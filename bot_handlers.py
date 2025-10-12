@@ -250,7 +250,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         message_text = '👋 <b>Главное меню</b>\n\nВыберите действие:'
     
     keyboard = [
-        [InlineKeyboardButton("📊 Дашборд", callback_data="menu_dashboard")],
+        [InlineKeyboardButton("📊 Дашборд", url="https://web-production-82c9.up.railway.app")],
         [InlineKeyboardButton("📄 Абонементы", callback_data="menu_subscriptions")],
         [InlineKeyboardButton("💰 Прогноз бюджета", callback_data="menu_forecast")],
         [InlineKeyboardButton("📅 Календарь занятий", callback_data="menu_calendar")],
