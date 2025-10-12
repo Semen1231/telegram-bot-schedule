@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="ru" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Дашборд Студии</title>
+    
+    <!-- Telegram Mini App Script -->
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #151634;
+        }
+        .main-card {
+            background-color: rgba(42, 52, 74, 0.5);
+            backdrop-filter: blur(12px);
+            border-radius: 1rem;
+            padding: 1.5rem;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        /* Стили для вида "Неделя" */
+        .week-container {
+            display: flex;
+            position: relative;
+        }
+        .timeline {
+            flex-shrink: 0;
+            padding-right: 1rem;
+        }
+        .hour-marker {
+            height: 60px; /* 1 час = 60px */
+            display: flex;
+            align-items: flex-start;
+            justify-content: flex-end;
+            font-size: 0.75rem;
+            color: #94A3B8;
+            position: relative;
+        }
+        .hour-marker::after {
+            content: '';
+            position: absolute;
+            left: 100%;
+            top: 0;
+            width: 2000px; /* Длинная линия */
+            height: 1px;
+            background-color: rgba(255, 255, 255, 0.1);
+        }
+        .week-grid {
+            display: grid;
+            grid-template-columns: repeat(7, minmax(0, 1fr));
+            flex-grow: 1;
+        }
+        .week-grid .calendar-day {
+            border-left: 1px solid rgba(255, 255, 255, 0.1);
+            position: relative;
+            min-height: 720px; /* 12 часов (9-21) * 60px */
+        }
+        .week-grid > div:last-child {
+            border-right: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .week-grid .event-pill {
+            position: absolute;
+            left: 4px;
+            right: 4px;
+        }
+        
+        .day-number {
+             font-weight: 500;
+             color: #94A3B8;
+        }
+        .day-number.today {
+            background: #FDDD00;
+            color: #151634;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+        }
+        .event-pill {
+            font-size: 0.75rem;
+            padding: 0.25rem 0.6rem;
+            border-radius: 0.5rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            color: white;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .event-pill:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+        }
+        .event-attended { background: linear-gradient(135deg, #00C1FF, #6A00FF); }
+        .event-skipped { background-color: #FD7000; }
+        .event-scheduled { background-color: #4B5563; }
+        .progress-bar-container {
+            display: flex;
+            gap: 2px;
+            width: 100%;
+            height: 10px;
+        }
+        .progress-segment {
+            flex-grow: 1;
+            border-radius: 2px;
+            cursor: pointer;
+        }
+        .gradient-text-blue { background: linear-gradient(45deg, #00C1FF, #6A00FF); background-clip: text; -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-weight: 500; }
+        .gradient-text-orange { background: linear-gradient(45deg, #FD7000, #FDDD00); background-clip: text; -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-weight: 500; }
+        .gradient-text-gray { background: linear-gradient(45deg, #9CA3AF, #E5E7EB); background-clip: text; -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-weight: 500; }
+        .gradient-text-yellow { background: linear-gradient(45deg, #FDDD00, #FBBF24); background-clip: text; -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-weight: 500; }
+
+        #tooltip {
+            position: absolute;
+            display: none;
+            background-color: #111827;
+            border: 1px solid #4B5563;
+            border-radius: 0.5rem;
+            padding: 0.75rem;
+            font-size: 0.75rem;
+            z-index: 10;
+            pointer-events: none;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+        }
+
+        /* Прелоадер */
+        .preloader {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(135deg, #151634, #2a344a);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 9999;
+            transition: opacity 0.5s ease, visibility 0.5s ease;
+        }
+
+        .preloader.hidden {
+            opacity: 0;
+            visibility: hidden;
+        }
+
+        .preloader-content {
+            text-align: center;
+            color: white;
+            max-width: 300px;
+            padding: 20px;
+        }
+
+        .spinner {
+            width: 60px;
+            height: 60px;
+            border: 4px solid rgba(255,255,255,0.3);
+            border-top: 4px solid #FDDD00;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 4px;
+            background: rgba(255,255,255,0.3);
+            border-radius: 2px;
+            overflow: hidden;
+            margin-top: 20px;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: #FDDD00;
+            width: 0%;
+            transition: width 0.3s ease;
+            animation: progress 3s ease-in-out;
+        }
+
+        @keyframes progress {
+            0% { width: 0%; }
+            50% { width: 70%; }
+            100% { width: 100%; }
+        }
+
+        .dashboard-content {
+            transition: opacity 0.5s ease, visibility 0.5s ease;
+        }
+
+        .dashboard-content.hidden {
+            opacity: 0;
+            visibility: hidden;
+        }
+    </style>
+</head>
+<body class="text-gray-300">
+    <!-- Прелоадер -->
+    <div id="preloader" class="preloader">
+        <div class="preloader-content">
+            <div class="spinner"></div>
+            <h3>📊 Загрузка дашборда...</h3>
+            <p>Получение данных из Google Sheets</p>
+            <div class="progress-bar">
+                <div class="progress-fill" id="progress-fill"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Основной контент -->
+    <div id="dashboard-content" class="dashboard-content hidden">
+        <div class="max-w-7xl mx-auto p-4 sm:p-6 lg:p-8">
+            
+            <main class="flex flex-col gap-6">
+                <!-- Блок с метриками за неделю -->
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-6">
+                     <div class="main-card p-4 text-center">
+                        <p class="text-sm text-gray-400">Запланировано</p>
+                        <!-- KPI: Scheduled Count -->
+                        <div id="kpi-scheduled" class="text-2xl lg:text-3xl font-medium mt-2 gradient-text-gray">0</div>
+                    </div>
+                    <div class="main-card p-4 text-center">
+                        <p class="text-sm text-gray-400">Посещено</p>
+                        <!-- KPI: Attended Count -->
+                        <div id="kpi-attended" class="text-2xl lg:text-3xl font-medium mt-2 gradient-text-blue">0</div>
+                    </div>
+                    <div class="main-card p-4 text-center">
+                        <p class="text-sm text-gray-400">Пропущено</p>
+                        <!-- KPI: Skipped Count -->
+                        <div id="kpi-skipped" class="text-2xl lg:text-3xl font-medium mt-2 gradient-text-orange">0</div>
+                    </div>
+                    <div class="main-card p-4 text-center">
+                        <p class="text-sm text-gray-400">Посещаемость</p>
+                        <!-- KPI: Attendance Rate -->
+                        <div id="kpi-rate" class="text-2xl lg:text-3xl font-medium mt-2 gradient-text-yellow">0%</div>
+                    </div>
+                </div>
+                
+                <!-- Блок с финансовыми метриками -->
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-6">
+                    <div class="main-card p-4 text-center">
+                        <p class="text-sm text-gray-400">Бюджет (мес)</p>
+                        <!-- KPI: Budget This Month -->
+                        <div id="kpi-budget-month" class="text-2xl lg:text-3xl font-medium mt-2 text-white">0</div>
+                    </div>
+                    <div class="main-card p-4 text-center">
+                        <p class="text-sm text-gray-400">Оплачено (мес)</p>
+                        <!-- KPI: Paid This Month -->
+                        <div id="kpi-paid-month" class="text-2xl lg:text-3xl font-medium mt-2 text-white">0</div>
+                    </div>
+                    <div class="main-card p-4 text-center">
+                        <p class="text-sm text-gray-400">Бюджет (нед)</p>
+                        <!-- KPI: Budget This Week -->
+                        <div id="kpi-budget-week" class="text-2xl lg:text-3xl font-medium mt-2 text-white">0</div>
+                    </div>
+                    <div class="main-card p-4 text-center">
+                        <p class="text-sm text-gray-400">Оплачено (нед)</p>
+                        <!-- KPI: Paid This Week -->
+                        <div id="kpi-paid-week" class="text-2xl lg:text-3xl font-medium mt-2 text-white">0</div>
+                    </div>
+                </div>
+
+                <!-- Блок прогресса абонементов -->
+                <div class="main-card">
+                    <h2 class="text-xl font-bold text-white mb-4">Прогресс по абонементам</h2>
+                    <div id="subscriptions-progress-container" class="space-y-4">
+                        <!-- Карточки абонементов будут сгенерированы JS -->
+                    </div>
+                </div>
+
+                <!-- Календарь убран - используется Google Calendar -->
+
+            </main>
+        </div>
+    </div>
+
+    <!-- Модальное окно -->
+    <div id="event-modal" class="fixed inset-0 bg-black bg-opacity-70 hidden items-center justify-center p-4 z-50">
+        <div id="modal-content" class="bg-gray-800 rounded-lg shadow-xl p-6 w-full max-w-sm border border-gray-700">
+            <h3 id="modal-title" class="text-xl font-bold text-white"></h3>
+            <p id="modal-child" class="text-gray-300 mt-1"></p>
+            <p id="modal-time" class="text-gray-400 mt-4"></p>
+            <p id="modal-status" class="text-gray-400 mt-1"></p>
+            <button id="modal-close" class="mt-6 w-full bg-gray-700 hover:bg-gray-600 p-2 rounded-md text-white">Закрыть</button>
+        </div>
+    </div>
+
+    <!-- Tooltip для прогресс-бара -->
+    <div id="tooltip"></div>
+
+    <!-- JavaScript -->
+    <script src="{{ url_for('static', filename='js/dashboard_integrated.js') }}"></script>
+</body>
+</html>
