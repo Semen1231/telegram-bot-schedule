@@ -61,34 +61,58 @@ class MinimalGoogleSheetsService:
             return []
     
     def get_handbook_items(self, category):
-        """Получает элементы справочника по категории"""
+        """Получает элементы справочника по категории - для студентов читаем из листа 'Дети'"""
         try:
+            if category == "Ребенок":
+                # Для детей читаем из отдельного листа
+                try:
+                    sheet = self.spreadsheet.worksheet("Дети")
+                    all_values = sheet.get_all_values()
+                    
+                    if not all_values or len(all_values) < 2:
+                        return []
+                    
+                    # Пропускаем заголовки, берем имена из первой колонки
+                    items = []
+                    for row in all_values[1:]:
+                        if row and row[0]:  # Первая колонка - имя ребенка
+                            items.append(row[0])
+                    
+                    return list(set(items))  # Убираем дубликаты
+                    
+                except Exception as e:
+                    logger.warning(f"Не удалось прочитать лист 'Дети', пробуем 'Справочник': {e}")
+            
+            # Альтернативный способ - из листа Справочник
             sheet = self.spreadsheet.worksheet("Справочник")
-            # Получаем все значения как список списков (обходим проблему с дублирующимися заголовками)
             all_values = sheet.get_all_values()
             
             if not all_values or len(all_values) < 2:
                 return []
             
-            # Первая строка - заголовки
+            # Ищем колонку с нужной категорией
             headers = all_values[0]
             
-            # Находим индексы нужных колонок
-            try:
-                category_col = headers.index('Категория')
-                name_col = headers.index('Название')
-            except ValueError:
-                logger.error(f"Не найдены колонки 'Категория' или 'Название' в справочнике")
+            # Пробуем найти колонку по разным вариантам названий
+            possible_names = [category, category.lower(), category.capitalize()]
+            category_col = None
+            
+            for idx, header in enumerate(headers):
+                if header in possible_names:
+                    category_col = idx
+                    break
+            
+            if category_col is None:
+                logger.warning(f"Не найдена колонка '{category}' в справочнике")
                 return []
             
-            # Фильтруем строки по категории
+            # Собираем уникальные непустые значения из найденной колонки
             items = []
-            for row in all_values[1:]:  # Пропускаем заголовки
-                if len(row) > max(category_col, name_col):
-                    if row[category_col] == category and row[name_col]:
-                        items.append(row[name_col])
+            for row in all_values[1:]:
+                if len(row) > category_col and row[category_col]:
+                    items.append(row[category_col])
             
-            return items
+            return list(set(items))  # Убираем дубликаты
             
         except Exception as e:
             logger.error(f"Ошибка получения справочника {category}: {e}")
