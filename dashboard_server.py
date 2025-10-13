@@ -125,19 +125,25 @@ class DashboardDataService:
         self._cache_duration = 60  # Кеш на 60 секунд
         
     def get_student_filters(self):
-        """Получает список студентов для фильтрации из абонементов"""
+        """Получает список студентов для фильтрации из активных абонементов (исключая завершенные)"""
         try:
             if not sheets_service:
                 return ['Все']
             
-            # Получаем список детей из абонементов (более надежно)
+            # Получаем список детей из активных абонементов (исключая завершенные)
             subscriptions = sheets_service.get_subscriptions_data()
             children = set()
             
             for sub in subscriptions:
-                child_name = sub.get('Ребенок', '').strip()
-                if child_name:
-                    children.add(child_name)
+                # Получаем статус из столбца J (индекс 9)
+                keys = list(sub.keys())
+                status = sub.get(keys[9], '') if len(keys) > 9 else ''
+                
+                # Исключаем завершенные абонементы
+                if status != 'Завершен':
+                    child_name = sub.get('Ребенок', '').strip()
+                    if child_name:
+                        children.add(child_name)
             
             # Добавляем опцию "Все" в начало списка
             filters = ['Все'] + sorted(list(children))
@@ -274,7 +280,7 @@ class DashboardDataService:
             return 0
     
     def get_subscription_progress(self, student_filter=None):
-        """Получает прогресс по абонементам с фильтрацией по студенту"""
+        """Получает прогресс по абонементам с фильтрацией по студенту и исключением завершенных"""
         try:
             if not sheets_service:
                 return []
@@ -284,14 +290,23 @@ class DashboardDataService:
             if not subs_data:
                 return []
             
-            # Фильтруем по студенту если указан (исправлена проблема с кодировкой)
+            # Фильтруем по статусу - исключаем "Завершен" (столбец J)
+            active_subs = []
+            for sub in subs_data:
+                # Получаем статус из столбца J (индекс 9)
+                keys = list(sub.keys())
+                status = sub.get(keys[9], '') if len(keys) > 9 else ''
+                
+                # Исключаем завершенные абонементы
+                if status != 'Завершен':
+                    active_subs.append(sub)
+            
+            # Дополнительно фильтруем по студенту если указан (исправлена проблема с кодировкой)
             if student_filter and student_filter not in ['Все', 'ÐÑÐµ', 'Все', None, '']:
                 active_subs = [
-                    sub for sub in subs_data 
+                    sub for sub in active_subs 
                     if sub.get('Ребенок') == student_filter
                 ]
-            else:
-                active_subs = subs_data
             
             progress_data = []
             
