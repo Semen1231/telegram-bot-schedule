@@ -3597,7 +3597,13 @@ class GoogleSheetsService:
             
             # Получаем данные из листа "Календарь занятий"
             calendar_sheet = self.spreadsheet.worksheet("Календарь занятий")
-            calendar_data = calendar_sheet.get_all_values()
+            try:
+                calendar_data = calendar_sheet.get_all_values()
+            except Exception as e:
+                if "429" in str(e) or "Quota exceeded" in str(e):
+                    logging.warning("⚠️ Превышена квота Google Sheets API. Пропускаю синхронизацию календаря.")
+                    return "⚠️ Синхронизация пропущена из-за превышения квоты API"
+                raise e
             
             if len(calendar_data) <= 1:
                 return "❌ Лист 'Календарь занятий' пуст или содержит только заголовки."

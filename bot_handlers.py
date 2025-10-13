@@ -671,13 +671,13 @@ async def update_data_in_background():
         logging.info(f"✅ Обновлено абонементов: {calendar_count}")
         
         # 2. Обновляем прогноз бюджета
-        await asyncio.sleep(2)  # Задержка для снижения нагрузки на API
+        await asyncio.sleep(5)  # Увеличенная задержка для снижения нагрузки на API
         logging.info("💰 Обновляю прогноз бюджета...")
         forecast_count, forecast_errors = sheets_service.update_full_forecast()
         logging.info(f"✅ Создано прогнозов: {forecast_count}")
         
         # 3. Синхронизируем с Google Calendar (фоновая синхронизация)
-        await asyncio.sleep(3)  # Задержка для снижения нагрузки на API
+        await asyncio.sleep(10)  # Увеличенная задержка для снижения нагрузки на API
         logging.info("🔄 Синхронизирую с Google Calendar...")
         try:
             calendar_result = sheets_service.sync_calendar_with_google_calendar()
@@ -686,7 +686,7 @@ async def update_data_in_background():
             logging.error(f"❌ Ошибка при синхронизации календаря: {e}")
         
         # 4. Синхронизируем прогноз с Google Calendar (фоновая синхронизация)
-        await asyncio.sleep(2)  # Задержка для снижения нагрузки на API
+        await asyncio.sleep(10)  # Увеличенная задержка для снижения нагрузки на API
         logging.info("💰 Синхронизирую прогноз с Google Calendar...")
         try:
             forecast_result = sheets_service.sync_forecast_with_google_calendar()
@@ -695,7 +695,7 @@ async def update_data_in_background():
             logging.error(f"❌ Ошибка при синхронизации прогноза: {e}")
         
         # 5. Очищаем дубли в Google Calendar (фоновая очистка)
-        await asyncio.sleep(2)  # Задержка для снижения нагрузки на API
+        await asyncio.sleep(15)  # Увеличенная задержка для снижения нагрузки на API
         logging.info("🧹 Очищаю дубли в Google Calendar...")
         try:
             clean_result = sheets_service.clean_duplicate_events()
