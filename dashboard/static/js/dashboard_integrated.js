@@ -427,11 +427,20 @@ class Dashboard {
         const subscriptions = this.dashboardData?.subscriptions || this.demoSubscriptions;
 
         subscriptions.forEach(sub => {
-            const total = sub.totalLessons || sub.lessons?.length || 0;
-            const completed = sub.completedLessons || 0;
-            const remaining = sub.remainingLessons || 0;
-            const progressPercentage = sub.progressPercent || (total > 0 ? (completed / total) * 100 : 0);
-            const missed = sub.missedThisMonth || 0;
+            const total = sub.total_lessons || sub.totalLessons || sub.lessons?.length || 0;
+            const completed = sub.completed_lessons || sub.completedLessons || 0;
+            const remaining = sub.remaining_lessons || sub.remainingLessons || 0;
+            const progressPercentage = sub.progress_percent || sub.progressPercent || (total > 0 ? (completed / total) * 100 : 0);
+            const missed = sub.missed_this_month || sub.missedThisMonth || 0;
+            
+            // Отладочная информация
+            console.log('🔍 DEBUG Subscription:', {
+                name: sub.name,
+                total_lessons: sub.total_lessons,
+                completed_lessons: sub.completed_lessons,
+                progress_percent: sub.progress_percent,
+                calculated: { total, completed, remaining, progressPercentage }
+            });
             
             let progressBarHTML = '';
             const lessons = sub.lessons || [];
@@ -470,7 +479,7 @@ class Dashboard {
                     <div class="flex justify-between items-center mb-2">
                         <span class="font-bold text-white text-sm">${sub.title || sub.name}</span>
                         <div>
-                            <span class="text-sm text-gray-400">Осталось: ${remaining} / ${total}</span>
+                            <span class="text-sm text-gray-400">Прошло: ${completed} / ${total}</span>
                             <span class="text-sm font-bold text-white ml-2">${Math.round(progressPercentage)}%</span>
                         </div>
                     </div>

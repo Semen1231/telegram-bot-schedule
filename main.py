@@ -68,10 +68,13 @@ def main() -> None:
         import requests
         import config
         url = f"https://api.telegram.org/bot{config.TELEGRAM_TOKEN}/deleteWebhook?drop_pending_updates=true"
+        logger.info(f"📡 Отправляю запрос: {url}")
         response = requests.post(url)
         logger.info(f"✅ Webhook очищен принудительно: {response.json()}")
     except Exception as e:
         logger.error(f"❌ Ошибка принудительной очистки webhook: {e}")
+    
+    logger.info("🔄 Продолжаю инициализацию...")
     
     # 1. Проверяем, что сервис Google Sheets работает
     if not sheets_service:

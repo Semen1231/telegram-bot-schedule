@@ -201,8 +201,8 @@ class DashboardDataService:
             if not active_subs:
                 return []
             
-            # Фильтруем по студенту если указан
-            if student_filter and student_filter != 'Все':
+            # Фильтруем по студенту если указан (исправлена проблема с кодировкой)
+            if student_filter and student_filter not in ['Все', 'ÐÑÐµ', 'Все', None, '']:
                 active_subs = [
                     sub for sub in active_subs 
                     if sub.get('Ребенок') == student_filter
@@ -225,17 +225,17 @@ class DashboardDataService:
                         total_lessons_value = sub.get(available_keys[4], 0)
                         total_lessons = int(total_lessons_value) if total_lessons_value else 0
                     
-                    # Столбец H - Осталось занятий (правильный столбец!)
-                    remaining_lessons = 0
+                    # Столбец H - Прошло занятий (количество посещенных занятий)
+                    completed_lessons = 0
                     if len(available_keys) > 7:  # Индекс 7 = столбец H
-                        remaining_value = sub.get(available_keys[7], 0)
-                        remaining_lessons = int(remaining_value) if remaining_value else 0
+                        completed_value = sub.get(available_keys[7], 0)
+                        completed_lessons = int(completed_value) if completed_value else 0
                     
-                    # Вычисляем пройденные занятия
-                    completed_lessons = total_lessons - remaining_lessons
+                    # Вычисляем оставшиеся занятия
+                    remaining_lessons = total_lessons - completed_lessons
                     
-                    # Процент выполнения: H / E * 100
-                    progress_percent = (remaining_lessons / total_lessons * 100) if total_lessons > 0 else 0
+                    # Процент выполнения: прошло / всего * 100
+                    progress_percent = (completed_lessons / total_lessons * 100) if total_lessons > 0 else 0
                     
                     # Получаем данные занятий из календаря для этого абонемента
                     calendar_data = self.get_calendar_lessons_data()

@@ -24,7 +24,13 @@ if os.getenv('GOOGLE_SERVICE_ACCOUNT_JSON'):
     except Exception as e:
         print(f"⚠️ Ошибка создания service_account.json: {e}")
 
-# Проверяем, что все необходимые переменные определены
-if not all([TELEGRAM_TOKEN, GOOGLE_SHEET_NAME, GOOGLE_CREDENTIALS_PATH]):
-    raise ValueError("Одна или несколько переменных окружения не установлены. Проверьте ваш .env файл или переменные на сервере.")
+# Проверяем, что ОБЯЗАТЕЛЬНЫЕ переменные определены
+if not TELEGRAM_TOKEN:
+    raise ValueError("TELEGRAM_BOT_TOKEN не установлен. Проверьте переменные окружения.")
+
+# Предупреждения для необязательных переменных
+if not GOOGLE_SHEET_NAME:
+    print("⚠️ GOOGLE_SHEET_NAME не установлен - Google Sheets будет недоступен")
+if not GOOGLE_CREDENTIALS_PATH or not os.path.exists(GOOGLE_CREDENTIALS_PATH):
+    print("⚠️ Google Service Account недоступен - Google Sheets будет недоступен")
 
