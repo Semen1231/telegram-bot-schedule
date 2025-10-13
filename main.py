@@ -67,7 +67,7 @@ def main() -> None:
     try:
         import requests
         import config
-        url = f"https://api.telegram.org/bot{config.TELEGRAM_TOKEN}/deleteWebhook?drop_pending_updates=true"
+        url = f"https://api.telegram.org/bot{config.TELEGRAM_BOT_TOKEN}/deleteWebhook?drop_pending_updates=true"
         logger.info(f"📡 Отправляю запрос: {url}")
         response = requests.post(url)
         logger.info(f"✅ Webhook очищен принудительно: {response.json()}")
@@ -84,7 +84,7 @@ def main() -> None:
 
     # 2. Создаем и настраиваем приложение бота
     logger.info("Создаю приложение бота...")
-    application = Application.builder().token(config.TELEGRAM_TOKEN).build()
+    application = Application.builder().token(config.TELEGRAM_BOT_TOKEN).build()
     logger.info("Приложение бота создано успешно.")
     
     logger.info("Бот запускается...")
