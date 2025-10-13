@@ -41,18 +41,21 @@ async def post_init_handler(application):
     
     # Затем запускаем планировщик если настроен
     try:
-        from notification_scheduler import get_notification_scheduler
-        notification_scheduler = get_notification_scheduler(application.bot)
-        
-        notification_time = sheets_service.get_notification_time()
-        notification_chat_id = sheets_service.get_notification_chat_id()
-        
-        if notification_time and notification_chat_id:
-            logger.info("🚀 Запускаю планировщик уведомлений...")
-            notification_scheduler.set_chat_id(notification_chat_id)
-            await asyncio.create_task(notification_scheduler.start_scheduler())
+        if sheets_service:
+            from notification_scheduler import get_notification_scheduler
+            notification_scheduler = get_notification_scheduler(application.bot)
+            
+            notification_time = sheets_service.get_notification_time()
+            notification_chat_id = sheets_service.get_notification_chat_id()
+            
+            if notification_time and notification_chat_id:
+                logger.info("🚀 Запускаю планировщик уведомлений...")
+                notification_scheduler.set_chat_id(notification_chat_id)
+                await asyncio.create_task(notification_scheduler.start_scheduler())
+            else:
+                logger.info("⚠️ Планировщик уведомлений не настроен")
         else:
-            logger.info("⚠️ Планировщик уведомлений не настроен")
+            logger.info("⚠️ Планировщик пропущен - Google Sheets недоступен")
     except Exception as e:
         logger.error(f"❌ Ошибка при запуске планировщика: {e}")
 
@@ -61,8 +64,9 @@ def main() -> None:
     
     # 1. Проверяем, что сервис Google Sheets работает
     if not sheets_service:
-        logging.critical("Не удалось запустить: ошибка подключения к Google Таблицам.")
-        return
+        logging.warning("⚠️ Google Sheets недоступен, но бот запустится без него")
+        # Временно не останавливаем бота для тестирования webhook fix
+        # return
 
     # 2. Создаем и настраиваем приложение бота
     logger.info("Создаю приложение бота...")
