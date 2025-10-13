@@ -1991,22 +1991,19 @@ async def save_attendance_mark(update: Update, context: ContextTypes.DEFAULT_TYP
         
         await query.edit_message_text(processing_message, parse_mode='HTML')
         
-        # Запускаем фоновое обновление и ждем его завершения
+        # Сначала показываем успех пользователю
+        success_message = f"🎉 <b>УСПЕШНО!</b>\n\n"
+        success_message += f"✅ <b>Отметка сохранена:</b> {attendance_mark}\n"
+        success_message += f"🔄 <b>Синхронизация запущена...</b>\n\n"
+        success_message += "📅 Возвращаемся к календарю..."
+        
+        await query.edit_message_text(success_message, parse_mode='HTML')
+        
+        # Запускаем фоновое обновление БЕЗ ОЖИДАНИЯ
         try:
-            await update_data_in_background()
-            logging.info("✅ Фоновое обновление завершено успешно")
-            
-            # 3. Показываем PUSH-уведомление об успехе на 3 секунды
-            success_message = f"🎉 <b>УСПЕШНО!</b>\n\n"
-            success_message += f"✅ <b>Отметка сохранена:</b> {attendance_mark}\n"
-            success_message += f"📊 <b>Все данные обновлены:</b>\n"
-            success_message += "• Статистика абонементов\n"
-            success_message += "• Прогноз бюджета\n"
-            success_message += "• Google Calendar синхронизирован\n"
-            success_message += "• Дубли очищены\n\n"
-            success_message += "🚀 <b>Готово!</b>"
-            
-            await query.edit_message_text(success_message, parse_mode='HTML')
+            import asyncio
+            asyncio.create_task(update_data_in_background())
+            logging.info("🚀 Фоновое обновление запущено асинхронно")
             
             # Ждем 3 секунды
             await asyncio.sleep(3)
@@ -3082,7 +3079,8 @@ async def confirm_delete_subscription_handler(update: Update, context: ContextTy
             if deletion_result['child_name'] and deletion_result['circle_name']:
                 try:
                     from google_calendar_service import GoogleCalendarService
-                    calendar_service = GoogleCalendarService()
+                    import config
+                    calendar_service = GoogleCalendarService(config.GOOGLE_CREDENTIALS_PATH, config.GOOGLE_CALENDAR_ID)
                     calendar_result = calendar_service.delete_subscription_events(
                         deletion_result['child_name'],
                         deletion_result['circle_name'], 

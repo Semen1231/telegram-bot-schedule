@@ -28,21 +28,18 @@ class GoogleSheetsService:
             self.client = gspread.authorize(creds)
             self.spreadsheet = self.client.open(spreadsheet_id)
             
-            # Инициализируем Google Calendar API
+            # Используем глобальный экземпляр Google Calendar Service
             try:
-                if GoogleCalendarService and config.GOOGLE_CALENDAR_ID:
-                    self.calendar_service = GoogleCalendarService(credentials_path, config.GOOGLE_CALENDAR_ID)
-                    print("Успешное подключение к Google Таблицам и Google Calendar.")
+                from google_calendar_service import calendar_service
+                self.calendar_service = calendar_service
+                if self.calendar_service:
+                    logging.info("Успешное подключение к Google Таблицам и Google Calendar.")
                 else:
-                    self.calendar_service = None
-                    if not config.GOOGLE_CALENDAR_ID:
-                        print("Успешное подключение к Google Таблицам. Google Calendar ID не настроен.")
-                    else:
-                        print("Успешное подключение к Google Таблицам. Google Calendar сервис недоступен.")
-            except Exception as calendar_error:
-                logging.warning(f"⚠️ Google Calendar сервис не доступен: {calendar_error}")
+                    logging.info("Успешное подключение к Google Таблицам. Calendar API отключен.")
+            except Exception as e:
+                logging.warning(f"⚠️ Google Calendar недоступен: {e}")
                 self.calendar_service = None
-                print("Успешное подключение к Google Таблицам. Calendar API недоступен.")
+                logging.info("Успешное подключение к Google Таблицам. Calendar API отключен.")
         except gspread.exceptions.SpreadsheetNotFound:
             print(f"Ошибка: Таблица с названием '{spreadsheet_id}' не найдена. Проверьте GOOGLE_SHEET_NAME в .env файле.")
             raise
@@ -5077,8 +5074,13 @@ class GoogleSheetsService:
         try:
             events_map = {}
             
+            # Проверяем доступность Calendar API
+            if not self.calendar_service:
+                logging.warning("Calendar API недоступен")
+                return {}
+            
             # Запрашиваем события из Google Calendar
-            events_result = self.calendar_service.events().list(
+            events_result = self.calendar_service.service.events().list(
                 calendarId=config.GOOGLE_CALENDAR_ID,
                 timeMin=start_date.isoformat() + 'Z',
                 timeMax=end_date.isoformat() + 'Z',
@@ -6055,14 +6057,19 @@ class GoogleSheetsService:
                 logging.warning("⚠️ Calendar API недоступен - пропускаю очистку дублей")
                 return "⚠️ Calendar API недоступен - очистка дублей пропущена"
             
-            # Получаем все существующие события
-            existing_events = self._get_existing_events()
-            if not existing_events:
+            # Получаем все существующие события за последние 6 месяцев
+            from datetime import datetime, timedelta
+            now = datetime.now()
+            start_date = now - timedelta(days=180)  # 6 месяцев назад
+            end_date = now + timedelta(days=180)    # 6 месяцев вперед
+            
+            existing_events_map = self._get_existing_events_map(start_date, end_date)
+            if not existing_events_map:
                 logging.info("ℹ️ События в календаре не найдены")
                 return "ℹ️ События в календаре не найдены - очистка не требуется"
             
             # Запускаем очистку дублей
-            duplicates_removed = self._remove_duplicate_events(existing_events)
+            duplicates_removed = self._remove_duplicate_events(list(existing_events_map.values()))
             
             if duplicates_removed > 0:
                 result_message = f"✅ Очистка завершена успешно! Удалено дублей: {duplicates_removed}"
