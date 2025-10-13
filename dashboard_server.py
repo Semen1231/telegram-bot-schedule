@@ -60,54 +60,7 @@ class MinimalGoogleSheetsService:
             logger.error(f"Ошибка получения данных абонементов: {e}")
             return []
     
-    def get_handbook_items(self, category):
-        """Получает элементы справочника по категории"""
-        try:
-            sheet = self.spreadsheet.worksheet("Справочник")
-            # Получаем все значения как список списков (обходим проблему с дублирующимися заголовками)
-            all_values = sheet.get_all_values()
-            
-            if not all_values or len(all_values) < 2:
-                return []
-            
-            # Первая строка - заголовки
-            headers = all_values[0]
-            
-            # Находим индексы нужных колонок
-            try:
-                category_col = headers.index('Категория')
-                name_col = headers.index('Название')
-            except ValueError:
-                # Логируем доступные заголовки для отладки
-                logger.error(f"Не найдены колонки 'Категория' или 'Название' в справочнике")
-                logger.error(f"Доступные заголовки: {headers}")
-                
-                # Пробуем альтернативные названия колонок
-                category_col = None
-                name_col = None
-                
-                for i, header in enumerate(headers):
-                    if header.lower() in ['категория', 'category', 'тип']:
-                        category_col = i
-                    elif header.lower() in ['название', 'name', 'имя', 'ребенок', 'child']:
-                        name_col = i
-                
-                if category_col is None or name_col is None:
-                    logger.error(f"Не удалось найти подходящие колонки в справочнике")
-                    return []
-            
-            # Фильтруем строки по категории
-            items = []
-            for row in all_values[1:]:  # Пропускаем заголовки
-                if len(row) > max(category_col, name_col):
-                    if row[category_col] == category and row[name_col]:
-                        items.append(row[name_col])
-            
-            return items
-            
-        except Exception as e:
-            logger.error(f"Ошибка получения справочника {category}: {e}")
-            return []
+    # Удален метод get_handbook_items - лист "Справочник" имеет другую структуру
     
     def get_calendar_lessons(self):
         """Получает данные календаря занятий"""
@@ -166,20 +119,28 @@ except Exception as e:
 
 class DashboardDataService:
     def __init__(self):
-        # Убираем кеширование - данные будут обновляться при каждом запросе
-        pass
+        # Добавляем кеширование для снижения API запросов
+        self._cache = {}
+        self._cache_timestamp = None
+        self._cache_duration = 60  # Кеш на 60 секунд
         
     def get_student_filters(self):
-        """Получает список студентов для фильтра из листа Справочник столбец B"""
+        """Получает список студентов для фильтрации из абонементов"""
         try:
             if not sheets_service:
                 return ['Все']
             
-            # Получаем данные из столбца B листа Справочник
-            students = sheets_service.get_handbook_items("Ребенок")  # столбец B
+            # Получаем список детей из абонементов (более надежно)
+            subscriptions = sheets_service.get_subscriptions_data()
+            children = set()
             
-            # Добавляем "Все" в начало списка
-            filters = ['Все'] + students
+            for sub in subscriptions:
+                child_name = sub.get('Ребенок', '').strip()
+                if child_name:
+                    children.add(child_name)
+            
+            # Добавляем опцию "Все" в начало списка
+            filters = ['Все'] + sorted(list(children))
             return filters
             
         except Exception as e:
