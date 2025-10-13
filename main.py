@@ -35,7 +35,7 @@ def start_telegram_bot():
 def main():
     """Запускает оба сервиса одновременно"""
     
-    service_mode = os.getenv('SERVICE_MODE', 'both')
+    service_mode = os.getenv('SERVICE_MODE', 'dashboard')
     print(f"🚀 Railway деплой - режим: {service_mode}")
     
     if service_mode == 'dashboard':
