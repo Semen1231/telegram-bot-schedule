@@ -4,6 +4,7 @@ from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 import config
+import pytz
 
 class GoogleCalendarService:
     def __init__(self, credentials_path, calendar_id):
@@ -129,10 +130,19 @@ class GoogleCalendarService:
                     logging.error(f"❌ Не удалось парсить время: начало='{lesson_data['start_time']}', конец='{lesson_data['end_time']}', ошибка: {ve}")
                     return None
                 
-                start_datetime = datetime.combine(lesson_date.date(), start_time)
-                end_datetime = datetime.combine(lesson_date.date(), end_time)
+                # Создаем datetime объекты БЕЗ часового пояса
+                start_datetime_naive = datetime.combine(lesson_date.date(), start_time)
+                end_datetime_naive = datetime.combine(lesson_date.date(), end_time)
                 
-                logging.info(f"🕐 Результат парсинга: {start_datetime} - {end_datetime}")
+                # Определяем часовой пояс (ваш локальный)
+                # Используем Asia/Yekaterinburg (UTC+5) вместо Europe/Moscow (UTC+3)
+                local_timezone = pytz.timezone('Asia/Yekaterinburg')
+                
+                # Локализуем время в вашем часовом поясе
+                start_datetime = local_timezone.localize(start_datetime_naive)
+                end_datetime = local_timezone.localize(end_datetime_naive)
+                
+                logging.info(f"🕐 Результат парсинга с часовым поясом: {start_datetime} - {end_datetime}")
                 
                 # Формируем описание с переменными для сравнения
                 description = f"""ID занятия: {lesson_data['lesson_id']}
@@ -149,11 +159,11 @@ ID абонемента: {lesson_data['subscription_id']}
                     'description': description,
                     'start': {
                         'dateTime': start_datetime.isoformat(),
-                        'timeZone': 'Europe/Moscow',
+                        'timeZone': 'Asia/Yekaterinburg',
                     },
                     'end': {
                         'dateTime': end_datetime.isoformat(),
-                        'timeZone': 'Europe/Moscow',
+                        'timeZone': 'Asia/Yekaterinburg',
                     },
                 }
 
@@ -216,10 +226,18 @@ ID абонемента: {lesson_data['subscription_id']}
                 logging.error(f"❌ Не удалось парсить время при обновлении: начало='{lesson_data['start_time']}', конец='{lesson_data['end_time']}', ошибка: {ve}")
                 return False
             
-            start_datetime = datetime.combine(lesson_date.date(), start_time)
-            end_datetime = datetime.combine(lesson_date.date(), end_time)
+            # Создаем datetime объекты БЕЗ часового пояса
+            start_datetime_naive = datetime.combine(lesson_date.date(), start_time)
+            end_datetime_naive = datetime.combine(lesson_date.date(), end_time)
             
-            logging.info(f"🕐 Результат парсинга при обновлении: {start_datetime} - {end_datetime}")
+            # Определяем часовой пояс (ваш локальный)
+            local_timezone = pytz.timezone('Asia/Yekaterinburg')
+            
+            # Локализуем время в вашем часовом поясе
+            start_datetime = local_timezone.localize(start_datetime_naive)
+            end_datetime = local_timezone.localize(end_datetime_naive)
+            
+            logging.info(f"🕐 Результат парсинга при обновлении с часовым поясом: {start_datetime} - {end_datetime}")
             
             # Формируем описание с переменными для сравнения
             description = f"""ID занятия: {lesson_data['lesson_id']}
@@ -236,11 +254,11 @@ ID абонемента: {lesson_data['subscription_id']}
                 'description': description,
                 'start': {
                     'dateTime': start_datetime.isoformat(),
-                    'timeZone': 'Europe/Moscow',
+                    'timeZone': 'Asia/Yekaterinburg',
                 },
                 'end': {
                     'dateTime': end_datetime.isoformat(),
-                    'timeZone': 'Europe/Moscow',
+                    'timeZone': 'Asia/Yekaterinburg',
                 },
             }
 
