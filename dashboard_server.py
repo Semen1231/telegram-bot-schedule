@@ -15,7 +15,10 @@ import sys
 # Добавляем корневую папку в путь для импорта наших модулей
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from google_sheets_service import GoogleSheetsService
+# ВРЕМЕННО: Создаем минимальный Google Sheets сервис без импорта основного модуля
+import gspread
+from google.oauth2 import service_account
+import config
 
 # Настройка логирования
 logging.basicConfig(
@@ -32,11 +35,35 @@ app = Flask(__name__,
 # Включаем CORS для работы с Telegram Mini App
 CORS(app)
 
-# Инициализируем сервис Google Sheets
+# Минимальный Google Sheets сервис только для дашборда
+class MinimalGoogleSheetsService:
+    def __init__(self, credentials_path, spreadsheet_name):
+        try:
+            scope = [
+                'https://www.googleapis.com/auth/spreadsheets',
+                'https://www.googleapis.com/auth/drive'
+            ]
+            creds = service_account.Credentials.from_service_account_file(credentials_path, scopes=scope)
+            self.client = gspread.authorize(creds)
+            self.spreadsheet = self.client.open(spreadsheet_name)
+            logger.info("✅ Минимальный Google Sheets сервис инициализирован")
+        except Exception as e:
+            logger.error(f"❌ Ошибка инициализации Google Sheets: {e}")
+            raise
+
+    def get_subscriptions_data(self):
+        """Получает данные абонементов для дашборда"""
+        try:
+            sheet = self.spreadsheet.worksheet("Абонементы")
+            return sheet.get_all_records()
+        except Exception as e:
+            logger.error(f"Ошибка получения данных абонементов: {e}")
+            return []
+
+# Инициализируем минимальный сервис
 try:
-    # Импортируем существующий экземпляр из основного модуля
-    from google_sheets_service import sheets_service
-    logger.info("✅ Google Sheets сервис инициализирован")
+    sheets_service = MinimalGoogleSheetsService(config.GOOGLE_CREDENTIALS_PATH, config.GOOGLE_SHEET_NAME)
+    logger.info("✅ Минимальный Google Sheets сервис готов")
 except Exception as e:
     logger.error(f"❌ Ошибка инициализации Google Sheets: {e}")
     sheets_service = None
@@ -189,24 +216,25 @@ class DashboardDataService:
             logger.error(f"Ошибка получения бюджетных метрик из {sheet_name}: {e}")
             return 0
     
-    def get_subscription_progress(self, student_filter='Все'):
-        """Получает данные прогресса по абонементам"""
+    def get_subscription_progress(self, student_filter=None):
+        """Получает прогресс по абонементам с фильтрацией по студенту"""
         try:
             if not sheets_service:
                 return []
             
-            # Получаем активные абонементы
-            active_subs = sheets_service.get_active_subscriptions()
-            
-            if not active_subs:
+            # Получаем данные абонементов
+            subs_data = sheets_service.get_subscriptions_data()
+            if not subs_data:
                 return []
             
             # Фильтруем по студенту если указан (исправлена проблема с кодировкой)
             if student_filter and student_filter not in ['Все', 'ÐÑÐµ', 'Все', None, '']:
                 active_subs = [
-                    sub for sub in active_subs 
+                    sub for sub in subs_data 
                     if sub.get('Ребенок') == student_filter
                 ]
+            else:
+                active_subs = subs_data
             
             progress_data = []
             
