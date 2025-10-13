@@ -4503,13 +4503,13 @@ async def dashboard_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     
-    message_text = """📊 <b>Дашборд</b>
+    # Используем правильный URL дашборда
+    dashboard_url = "https://web-production-14114.up.railway.app"
+    
+    message_text = f"""📊 <b>Дашборд</b>
 
-🌐 <b>Локальный доступ:</b>
-Откройте в браузере: http://127.0.0.1:5000
-
-📱 <b>Для Telegram Mini App:</b>
-Требуется HTTPS сервер для работы в Telegram.
+🌐 <b>Веб-версия:</b>
+{dashboard_url}
 
 🔧 <b>Что доступно в дашборде:</b>
 • 📊 Метрики посещаемости
@@ -4518,10 +4518,10 @@ async def dashboard_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 • 📅 Интерактивный календарь
 • 🎯 Фильтры по ученикам
 
-💡 <b>Совет:</b> Скопируйте ссылку и откройте в браузере для полного доступа к дашборду."""
+💡 <b>Совет:</b> Нажмите кнопку ниже чтобы открыть дашборд в браузере."""
 
     keyboard = [
-        [InlineKeyboardButton("🌐 Открыть в браузере", url="http://127.0.0.1:5000")],
+        [InlineKeyboardButton("🌐 Открыть дашборд", url=dashboard_url)],
         [InlineKeyboardButton("🏠 Главное меню", callback_data="main_menu")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
