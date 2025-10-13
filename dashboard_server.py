@@ -64,10 +64,32 @@ class MinimalGoogleSheetsService:
         """Получает элементы справочника по категории"""
         try:
             sheet = self.spreadsheet.worksheet("Справочник")
-            data = sheet.get_all_records()
-            # Фильтруем по категории
-            items = [row for row in data if row.get('Категория') == category]
-            return [item.get('Название', '') for item in items if item.get('Название')]
+            # Получаем все значения как список списков (обходим проблему с дублирующимися заголовками)
+            all_values = sheet.get_all_values()
+            
+            if not all_values or len(all_values) < 2:
+                return []
+            
+            # Первая строка - заголовки
+            headers = all_values[0]
+            
+            # Находим индексы нужных колонок
+            try:
+                category_col = headers.index('Категория')
+                name_col = headers.index('Название')
+            except ValueError:
+                logger.error(f"Не найдены колонки 'Категория' или 'Название' в справочнике")
+                return []
+            
+            # Фильтруем строки по категории
+            items = []
+            for row in all_values[1:]:  # Пропускаем заголовки
+                if len(row) > max(category_col, name_col):
+                    if row[category_col] == category and row[name_col]:
+                        items.append(row[name_col])
+            
+            return items
+            
         except Exception as e:
             logger.error(f"Ошибка получения справочника {category}: {e}")
             return []
