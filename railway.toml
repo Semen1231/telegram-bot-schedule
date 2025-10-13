@@ -2,6 +2,6 @@
 builder = "NIXPACKS"
 
 [deploy]
-startCommand = "python main.py & python dashboard_server.py"
+startCommand = "python worker.py"
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 10
