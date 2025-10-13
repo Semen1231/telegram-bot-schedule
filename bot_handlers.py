@@ -2545,10 +2545,13 @@ async def set_notification_time_handler(update: Update, context: ContextTypes.DE
             # Инициализируем планировщик если он еще не запущен
             global notification_scheduler
             if notification_scheduler is None:
-                # ВРЕМЕННО ОТКЛЮЧЕНО для устранения конфликта Railway
-                # from notification_scheduler import get_notification_scheduler
-                # notification_scheduler = get_notification_scheduler(context.bot)
-                notification_scheduler = None
+                try:
+                    from notification_scheduler import get_notification_scheduler
+                    notification_scheduler = get_notification_scheduler(context.bot)
+                    logging.info("✅ Планировщик уведомлений инициализирован")
+                except Exception as e:
+                    logging.error(f"❌ Ошибка инициализации планировщика: {e}")
+                    notification_scheduler = None
                 
             # Устанавливаем chat_id в планировщик
             if notification_scheduler:
@@ -2626,12 +2629,13 @@ async def test_notifications_handler(update: Update, context: ContextTypes.DEFAU
     try:
         await query.edit_message_text("🧪 <b>Тестирование системы уведомлений</b>\n\n⏳ Ищу занятия на сегодня...", parse_mode='HTML')
         
-        # ВРЕМЕННО ОТКЛЮЧЕНО для устранения конфликта Railway
-        # from notification_scheduler import get_notification_scheduler
-        # notification_scheduler = get_notification_scheduler(context.bot)
-        # if notification_scheduler is None:
-        #     notification_scheduler = get_notification_scheduler(context.bot)
-        notification_scheduler = None
+        try:
+            from notification_scheduler import get_notification_scheduler
+            notification_scheduler = get_notification_scheduler(context.bot)
+            logging.info("✅ Планировщик для тестирования инициализирован")
+        except Exception as e:
+            logging.error(f"❌ Ошибка инициализации планировщика для тестирования: {e}")
+            notification_scheduler = None
         
         # Устанавливаем текущий chat_id для тестирования
         current_chat_id = query.message.chat_id
