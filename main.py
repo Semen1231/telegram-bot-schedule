@@ -67,12 +67,25 @@ def main() -> None:
     try:
         import requests
         import config
+        
+        if not config.TELEGRAM_TOKEN:
+            logger.error("❌ TELEGRAM_TOKEN не найден в config!")
+            raise ValueError("TELEGRAM_TOKEN отсутствует")
+            
         url = f"https://api.telegram.org/bot{config.TELEGRAM_TOKEN}/deleteWebhook?drop_pending_updates=true"
-        logger.info(f"📡 Отправляю запрос: {url}")
-        response = requests.post(url)
-        logger.info(f"✅ Webhook очищен принудительно: {response.json()}")
+        logger.info(f"📡 Отправляю запрос на очистку webhook...")
+        
+        response = requests.post(url, timeout=10)
+        result = response.json()
+        
+        if result.get('ok'):
+            logger.info(f"✅ Webhook очищен принудительно: {result}")
+        else:
+            logger.error(f"❌ Ошибка очистки webhook: {result}")
+            
     except Exception as e:
-        logger.error(f"❌ Ошибка принудительной очистки webhook: {e}")
+        logger.error(f"❌ Критическая ошибка принудительной очистки webhook: {e}")
+        logger.error(f"❌ Тип ошибки: {type(e).__name__}")
     
     logger.info("🔄 Продолжаю инициализацию...")
     
