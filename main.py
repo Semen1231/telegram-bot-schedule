@@ -62,11 +62,22 @@ async def post_init_handler(application):
 def main() -> None:
     """Основная функция для запуска бота."""
     
+    # 0. ПРИНУДИТЕЛЬНАЯ ОЧИСТКА WEBHOOK ПЕРЕД ЗАПУСКОМ
+    logger.info("🔧 ПРИНУДИТЕЛЬНАЯ очистка webhook перед запуском...")
+    try:
+        import requests
+        import config
+        url = f"https://api.telegram.org/bot{config.TELEGRAM_TOKEN}/deleteWebhook?drop_pending_updates=true"
+        response = requests.post(url)
+        logger.info(f"✅ Webhook очищен принудительно: {response.json()}")
+    except Exception as e:
+        logger.error(f"❌ Ошибка принудительной очистки webhook: {e}")
+    
     # 1. Проверяем, что сервис Google Sheets работает
     if not sheets_service:
         logging.warning("⚠️ Google Sheets недоступен, но бот запустится без него")
-        # Временно не останавливаем бота для тестирования webhook fix
-        # return
+        # ВРЕМЕННО: Полностью игнорируем Google Sheets для исправления webhook
+        pass
 
     # 2. Создаем и настраиваем приложение бота
     logger.info("Создаю приложение бота...")
