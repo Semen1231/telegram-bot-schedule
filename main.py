@@ -34,6 +34,28 @@ async def clear_webhook_and_setup(application):
     except Exception as e:
         logger.error(f"❌ Ошибка при очистке webhook: {e}")
 
+async def post_init_handler(application):
+    """Обработчик инициализации после запуска бота."""
+    # Сначала очищаем webhook и устанавливаем команды
+    await clear_webhook_and_setup(application)
+    
+    # Затем запускаем планировщик если настроен
+    try:
+        from notification_scheduler import get_notification_scheduler
+        notification_scheduler = get_notification_scheduler(application.bot)
+        
+        notification_time = sheets_service.get_notification_time()
+        notification_chat_id = sheets_service.get_notification_chat_id()
+        
+        if notification_time and notification_chat_id:
+            logger.info("🚀 Запускаю планировщик уведомлений...")
+            notification_scheduler.set_chat_id(notification_chat_id)
+            await asyncio.create_task(notification_scheduler.start_scheduler())
+        else:
+            logger.info("⚠️ Планировщик уведомлений не настроен")
+    except Exception as e:
+        logger.error(f"❌ Ошибка при запуске планировщика: {e}")
+
 def main() -> None:
     """Основная функция для запуска бота."""
     
@@ -55,44 +77,9 @@ def main() -> None:
     application.add_handler(conv_handler)
     logger.info("Обработчики зарегистрированы.")
     
-    # 4. Инициализируем планировщик уведомлений
-    logger.info("🔔 Инициализирую планировщик уведомлений...")
-    try:
-        from notification_scheduler import get_notification_scheduler
-        notification_scheduler = get_notification_scheduler(application.bot)
-        
-        # Проверяем, настроено ли время уведомлений
-        notification_time = sheets_service.get_notification_time()
-        notification_chat_id = sheets_service.get_notification_chat_id()
-        
-        logger.info(f"📊 СТАТУС НАСТРОЕК УВЕДОМЛЕНИЙ:")
-        logger.info(f"   ⏰ notification_time: '{notification_time}'")
-        logger.info(f"   📱 notification_chat_id: '{notification_chat_id}'")
-        
-        if notification_time and notification_chat_id:
-            logger.info(f"✅ Найдено настроенное время уведомлений: {notification_time}")
-            logger.info(f"✅ Найден chat_id для уведомлений: {notification_chat_id}")
-            
-            # Устанавливаем chat_id в планировщик
-            notification_scheduler.set_chat_id(notification_chat_id)
-            
-            # Планировщик будет запущен после старта event loop
-            application.post_init = lambda app: asyncio.create_task(notification_scheduler.start_scheduler())
-            logger.info("🚀 Планировщик уведомлений будет запущен после старта бота")
-        else:
-            if not notification_time:
-                logger.info("⚠️ Время уведомлений не настроено")
-            if not notification_chat_id:
-                logger.info("⚠️ Chat ID для уведомлений не настроен")
-            logger.info("❌ Планировщик не запущен")
-    except Exception as e:
-        logger.error(f"❌ Ошибка при инициализации планировщика уведомлений: {e}")
-        import traceback
-        logger.error(f"📊 Traceback: {traceback.format_exc()}")
-    
-    # 5. Устанавливаем команды меню при запуске
-    logger.info("🔧 Команды меню будут установлены при запуске бота...")
-    application.post_init = clear_webhook_and_setup
+    # 4. Устанавливаем обработчик инициализации
+    logger.info("🔧 Настраиваю обработчик инициализации...")
+    application.post_init = post_init_handler
     
     # 6. Запускаем бота
     logger.info("Запускаю polling...")
