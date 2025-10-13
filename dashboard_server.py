@@ -688,9 +688,9 @@ def internal_error(error):
 
 if __name__ == '__main__':
     # Настройки для запуска (локально и на сервере)
-    HOST = '0.0.0.0'  # Разрешаем доступ с любого IP
+    HOST = os.getenv('HOST', '0.0.0.0')
     PORT = int(os.getenv('PORT', 5001))  # Порт из переменной окружения или 5001 по умолчанию
-    DEBUG = os.getenv('DEBUG', 'True').lower() == 'true'
+    DEBUG = False  # Отключаем debug mode чтобы избежать дублирования процессов
     
     logger.info(f"🚀 Запуск Dashboard Server на http://{HOST}:{PORT}")
     logger.info(f"📊 Дашборд доступен по адресу: http://{HOST}:{PORT}")
@@ -699,37 +699,18 @@ if __name__ == '__main__':
     logger.info(f"   • GET /api/health - проверка здоровья")
     logger.info(f"   • GET /api/refresh - обновление данных")
     
-    # Запускаем Telegram бота в отдельном потоке
-    import threading
-    import asyncio
+    # Запускаем Telegram бота в отдельном процессе
+    import subprocess
+    import sys
     
-    def run_telegram_bot():
-        """Запускает Telegram бота в отдельном потоке с async event loop"""
-        try:
-            logger.info("🤖 Запускаю Telegram бота...")
-            
-            # Создаем новый event loop для этого потока
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            
-            # Импортируем и запускаем main
-            from main import main
-            main()
-            
-        except Exception as e:
-            logger.error(f"❌ Ошибка запуска Telegram бота: {e}")
-        finally:
-            # Закрываем event loop
-            try:
-                loop = asyncio.get_event_loop()
-                loop.close()
-            except:
-                pass
-    
-    # Запускаем бота в отдельном потоке
-    bot_thread = threading.Thread(target=run_telegram_bot, daemon=True)
-    bot_thread.start()
-    logger.info("🤖 Telegram бот запущен в отдельном потоке")
+    logger.info("🤖 Запускаю Telegram бота в отдельном процессе...")
+    bot_process = subprocess.Popen(
+        [sys.executable, 'main.py'],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True
+    )
+    logger.info(f"🤖 Telegram бот запущен (PID: {bot_process.pid})")
     
     # Запускаем Flask сервер
     try:
