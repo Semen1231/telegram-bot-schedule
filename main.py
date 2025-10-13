@@ -43,7 +43,7 @@ def main():
         start_dashboard()
         
     elif service_mode == 'bot':
-        # Только бот
+        # Только бот (для worker процесса)
         print("🤖 Запуск только Telegram Bot...")
         try:
             from bot_main import main as bot_main
@@ -51,21 +51,27 @@ def main():
         except Exception as e:
             print(f"❌ Ошибка запуска Telegram Bot: {e}")
             sys.exit(1)
+            
+    elif service_mode == 'both':
+        # Оба сервиса (устаревший режим)
+        print("🚀 Запуск обоих сервисов...")
         
-    elif service_mode == 'both' or service_mode == '':
-        # Оба сервиса (по умолчанию для Railway)
-        print("🔄 Запуск обоих сервисов...")
-        
-        # Запускаем дашборд в отдельном потоке
+        # Запускаем dashboard в отдельном потоке
         dashboard_thread = threading.Thread(target=start_dashboard, daemon=True)
         dashboard_thread.start()
         
-        # Запускаем бота в основном потоке
-        start_telegram_bot()
+        # Небольшая задержка, чтобы дашборд успел запуститься
+        time.sleep(5)
         
+        # Запускаем бота в основном потоке
+        try:
+            from bot_main import main as bot_main
+            bot_main()
+        except Exception as e:
+            print(f"❌ Ошибка запуска Telegram Bot: {e}")
+    
     else:
-        print(f"❌ Неизвестный режим: {service_mode}")
-        print("💡 Доступные режимы: 'bot', 'dashboard', 'both'")
+        print(f"❌ Неизвестный режим SERVICE_MODE: {service_mode}")
         sys.exit(1)
 
 if __name__ == "__main__":
