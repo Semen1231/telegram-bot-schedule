@@ -699,6 +699,25 @@ if __name__ == '__main__':
     logger.info(f"   • GET /api/health - проверка здоровья")
     logger.info(f"   • GET /api/refresh - обновление данных")
     
+    # Запускаем Telegram бота в отдельном потоке
+    import threading
+    import asyncio
+    
+    def run_telegram_bot():
+        """Запускает Telegram бота в отдельном потоке"""
+        try:
+            logger.info("🤖 Запускаю Telegram бота...")
+            from main import main
+            main()
+        except Exception as e:
+            logger.error(f"❌ Ошибка запуска Telegram бота: {e}")
+    
+    # Запускаем бота в отдельном потоке
+    bot_thread = threading.Thread(target=run_telegram_bot, daemon=True)
+    bot_thread.start()
+    logger.info("🤖 Telegram бот запущен в отдельном потоке")
+    
+    # Запускаем Flask сервер
     try:
         app.run(host=HOST, port=PORT, debug=DEBUG)
     except Exception as e:
