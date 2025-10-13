@@ -702,15 +702,34 @@ if __name__ == '__main__':
     # Запускаем Telegram бота в отдельном процессе
     import subprocess
     import sys
+    import os
     
     logger.info("🤖 Запускаю Telegram бота в отдельном процессе...")
-    bot_process = subprocess.Popen(
-        [sys.executable, 'main.py'],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True
-    )
-    logger.info(f"🤖 Telegram бот запущен (PID: {bot_process.pid})")
+    logger.info(f"🤖 Python executable: {sys.executable}")
+    logger.info(f"🤖 Current directory: {os.getcwd()}")
+    logger.info(f"🤖 main.py exists: {os.path.exists('main.py')}")
+    
+    try:
+        bot_process = subprocess.Popen(
+            [sys.executable, 'main.py'],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,  # Объединяем stderr с stdout
+            text=True,
+            bufsize=1  # Line buffered
+        )
+        logger.info(f"🤖 Telegram бот запущен (PID: {bot_process.pid})")
+        
+        # Читаем первые несколько строк вывода
+        import threading
+        def log_bot_output():
+            for line in bot_process.stdout:
+                logger.info(f"[BOT] {line.rstrip()}")
+        
+        output_thread = threading.Thread(target=log_bot_output, daemon=True)
+        output_thread.start()
+        
+    except Exception as e:
+        logger.error(f"❌ Ошибка запуска бота: {e}")
     
     # Запускаем Flask сервер
     try:
