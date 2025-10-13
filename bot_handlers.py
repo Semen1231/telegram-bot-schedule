@@ -250,7 +250,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         message_text = '👋 <b>Главное меню</b>\n\nВыберите действие:'
     
     keyboard = [
-        [InlineKeyboardButton("📊 Дашборд", web_app=WebAppInfo(url="https://web-production-14114.up.railway.app"))],
+        [InlineKeyboardButton("📊 Дашборд", web_app=WebAppInfo(url="https://web-production-547b.up.railway.app"))],
         [InlineKeyboardButton("📄 Абонементы", callback_data="menu_subscriptions")],
         [InlineKeyboardButton("💰 Прогноз бюджета", callback_data="menu_forecast")],
         [InlineKeyboardButton("📅 Календарь занятий", callback_data="menu_calendar")],
@@ -4520,7 +4520,7 @@ async def dashboard_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     
     # Используем правильный URL дашборда
-    dashboard_url = "https://web-production-14114.up.railway.app"
+    dashboard_url = "https://web-production-547b.up.railway.app"
     
     message_text = f"""📊 <b>Дашборд</b>
 
