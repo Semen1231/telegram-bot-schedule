@@ -1,2 +1,2 @@
 web: python dashboard_server.py
-# worker: python main.py  # Временно отключен для устранения конфликта
+# worker: python bot_main.py  # Временно отключен (переименован для предотвращения автозапуска)
