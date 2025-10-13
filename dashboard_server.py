@@ -59,6 +59,45 @@ class MinimalGoogleSheetsService:
         except Exception as e:
             logger.error(f"Ошибка получения данных абонементов: {e}")
             return []
+    
+    def get_handbook_items(self, category):
+        """Получает элементы справочника по категории"""
+        try:
+            sheet = self.spreadsheet.worksheet("Справочник")
+            data = sheet.get_all_records()
+            # Фильтруем по категории
+            items = [row for row in data if row.get('Категория') == category]
+            return [item.get('Название', '') for item in items if item.get('Название')]
+        except Exception as e:
+            logger.error(f"Ошибка получения справочника {category}: {e}")
+            return []
+    
+    def get_calendar_lessons(self):
+        """Получает данные календаря занятий"""
+        try:
+            sheet = self.spreadsheet.worksheet("Календарь занятий")
+            return sheet.get_all_records()
+        except Exception as e:
+            logger.error(f"Ошибка получения календаря занятий: {e}")
+            return []
+    
+    def get_planned_payments(self):
+        """Получает запланированные платежи"""
+        try:
+            sheet = self.spreadsheet.worksheet("Прогноз")
+            return sheet.get_all_records()
+        except Exception as e:
+            logger.error(f"Ошибка получения прогноза платежей: {e}")
+            return []
+    
+    def get_paid_payments(self):
+        """Получает оплаченные платежи"""
+        try:
+            sheet = self.spreadsheet.worksheet("Оплачено")
+            return sheet.get_all_records()
+        except Exception as e:
+            logger.error(f"Ошибка получения оплаченных платежей: {e}")
+            return []
 
 # Инициализируем минимальный сервис
 try:
