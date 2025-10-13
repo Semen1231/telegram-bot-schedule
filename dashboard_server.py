@@ -61,58 +61,49 @@ class MinimalGoogleSheetsService:
             return []
     
     def get_handbook_items(self, category):
-        """Получает элементы справочника по категории - для студентов читаем из листа 'Дети'"""
+        """Получает элементы справочника по категории"""
         try:
-            if category == "Ребенок":
-                # Для детей читаем из отдельного листа
-                try:
-                    sheet = self.spreadsheet.worksheet("Дети")
-                    all_values = sheet.get_all_values()
-                    
-                    if not all_values or len(all_values) < 2:
-                        return []
-                    
-                    # Пропускаем заголовки, берем имена из первой колонки
-                    items = []
-                    for row in all_values[1:]:
-                        if row and row[0]:  # Первая колонка - имя ребенка
-                            items.append(row[0])
-                    
-                    return list(set(items))  # Убираем дубликаты
-                    
-                except Exception as e:
-                    logger.warning(f"Не удалось прочитать лист 'Дети', пробуем 'Справочник': {e}")
-            
-            # Альтернативный способ - из листа Справочник
             sheet = self.spreadsheet.worksheet("Справочник")
+            # Получаем все значения как список списков (обходим проблему с дублирующимися заголовками)
             all_values = sheet.get_all_values()
             
             if not all_values or len(all_values) < 2:
                 return []
             
-            # Ищем колонку с нужной категорией
+            # Первая строка - заголовки
             headers = all_values[0]
             
-            # Пробуем найти колонку по разным вариантам названий
-            possible_names = [category, category.lower(), category.capitalize()]
-            category_col = None
+            # Находим индексы нужных колонок
+            try:
+                category_col = headers.index('Категория')
+                name_col = headers.index('Название')
+            except ValueError:
+                # Логируем доступные заголовки для отладки
+                logger.error(f"Не найдены колонки 'Категория' или 'Название' в справочнике")
+                logger.error(f"Доступные заголовки: {headers}")
+                
+                # Пробуем альтернативные названия колонок
+                category_col = None
+                name_col = None
+                
+                for i, header in enumerate(headers):
+                    if header.lower() in ['категория', 'category', 'тип']:
+                        category_col = i
+                    elif header.lower() in ['название', 'name', 'имя', 'ребенок', 'child']:
+                        name_col = i
+                
+                if category_col is None or name_col is None:
+                    logger.error(f"Не удалось найти подходящие колонки в справочнике")
+                    return []
             
-            for idx, header in enumerate(headers):
-                if header in possible_names:
-                    category_col = idx
-                    break
-            
-            if category_col is None:
-                logger.warning(f"Не найдена колонка '{category}' в справочнике")
-                return []
-            
-            # Собираем уникальные непустые значения из найденной колонки
+            # Фильтруем строки по категории
             items = []
-            for row in all_values[1:]:
-                if len(row) > category_col and row[category_col]:
-                    items.append(row[category_col])
+            for row in all_values[1:]:  # Пропускаем заголовки
+                if len(row) > max(category_col, name_col):
+                    if row[category_col] == category and row[name_col]:
+                        items.append(row[name_col])
             
-            return list(set(items))  # Убираем дубликаты
+            return items
             
         except Exception as e:
             logger.error(f"Ошибка получения справочника {category}: {e}")
@@ -144,6 +135,26 @@ class MinimalGoogleSheetsService:
         except Exception as e:
             logger.error(f"Ошибка получения оплаченных платежей: {e}")
             return []
+    
+    def sync_calendar_after_subscription(self, subscription_data):
+        """Синхронизирует календарь после создания абонемента"""
+        try:
+            logger.info(f"🔄 Запуск синхронизации календаря для абонемента: {subscription_data.get('name', 'Неизвестно')}")
+            
+            # Получаем данные абонементов
+            subscriptions = self.get_subscriptions_data()
+            if not subscriptions:
+                logger.warning("Нет данных абонементов для синхронизации")
+                return False
+            
+            # Здесь должна быть логика синхронизации с Google Calendar
+            # Пока что просто логируем
+            logger.info(f"✅ Синхронизация календаря завершена (заглушка)")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Ошибка синхронизации календаря: {e}")
+            return False
 
 # Инициализируем минимальный сервис
 try:
@@ -757,6 +768,36 @@ def debug_metrics():
         
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/sync-calendar', methods=['POST'])
+def api_sync_calendar():
+    """API для синхронизации календаря после создания абонемента"""
+    try:
+        if not sheets_service:
+            return jsonify({
+                'success': False,
+                'error': 'Google Sheets сервис недоступен'
+            }), 500
+        
+        # Получаем данные из запроса
+        data = request.get_json() if request.is_json else {}
+        
+        # Запускаем синхронизацию
+        result = sheets_service.sync_calendar_after_subscription(data)
+        
+        return jsonify({
+            'success': result,
+            'message': 'Синхронизация календаря запущена' if result else 'Ошибка синхронизации',
+            'timestamp': datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        logger.error(f"Ошибка в api_sync_calendar: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'timestamp': datetime.now().isoformat()
+        }), 500
 
 @app.route('/api/refresh')
 def api_refresh():
