@@ -704,13 +704,27 @@ if __name__ == '__main__':
     import asyncio
     
     def run_telegram_bot():
-        """Запускает Telegram бота в отдельном потоке"""
+        """Запускает Telegram бота в отдельном потоке с async event loop"""
         try:
             logger.info("🤖 Запускаю Telegram бота...")
+            
+            # Создаем новый event loop для этого потока
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+            # Импортируем и запускаем main
             from main import main
             main()
+            
         except Exception as e:
             logger.error(f"❌ Ошибка запуска Telegram бота: {e}")
+        finally:
+            # Закрываем event loop
+            try:
+                loop = asyncio.get_event_loop()
+                loop.close()
+            except:
+                pass
     
     # Запускаем бота в отдельном потоке
     bot_thread = threading.Thread(target=run_telegram_bot, daemon=True)
