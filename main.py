@@ -1,4 +1,5 @@
 import logging
+import asyncio
 from telegram.ext import Application
 from telegram import BotCommand
 import config
@@ -12,14 +13,26 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-async def setup_bot_commands(application):
-    """Устанавливает команды меню бота."""
-    commands = [
-        BotCommand("start", "🏠 Главное меню"),
-    ]
-    
-    await application.bot.set_my_commands(commands)
-    logger.info("✅ Команда меню установлена")
+async def clear_webhook_and_setup(application):
+    """Очищает webhook и устанавливает команды меню бота."""
+    try:
+        # Очищаем webhook
+        logger.info("🔧 Очищаю webhook...")
+        await application.bot.delete_webhook(drop_pending_updates=True)
+        logger.info("✅ Webhook очищен")
+        
+        # Небольшая задержка
+        await asyncio.sleep(2)
+        
+        # Устанавливаем команды
+        commands = [
+            BotCommand("start", "🏠 Главное меню"),
+        ]
+        
+        await application.bot.set_my_commands(commands)
+        logger.info("✅ Команда меню установлена")
+    except Exception as e:
+        logger.error(f"❌ Ошибка при очистке webhook: {e}")
 
 def main() -> None:
     """Основная функция для запуска бота."""
@@ -79,7 +92,7 @@ def main() -> None:
     
     # 5. Устанавливаем команды меню при запуске
     logger.info("🔧 Команды меню будут установлены при запуске бота...")
-    application.post_init = setup_bot_commands
+    application.post_init = clear_webhook_and_setup
     
     # 6. Запускаем бота
     logger.info("Запускаю polling...")
