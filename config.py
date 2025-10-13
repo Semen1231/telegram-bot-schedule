@@ -3,7 +3,14 @@ import json
 from dotenv import load_dotenv
 
 # Загружаем переменные окружения из файла .env (для локального запуска)
-load_dotenv()
+# Сначала пробуем .env.local (для разработки), потом .env (для продакшна)
+import os
+if os.path.exists('.env.local'):
+    load_dotenv('.env.local')
+    print("🔧 Загружен .env.local (локальная разработка)")
+else:
+    load_dotenv()
+    print("🔧 Загружен .env (продакшн)")
 
 # Получаем переменные
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')

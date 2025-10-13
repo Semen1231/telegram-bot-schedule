@@ -692,42 +692,7 @@ if __name__ == '__main__':
     PORT = int(os.getenv('PORT', 5001))  # Порт из переменной окружения или 5001 по умолчанию
     DEBUG = False  # Отключаем debug mode чтобы избежать дублирования процессов
     
-    # СНАЧАЛА запускаем Telegram бота в отдельном процессе
-    import subprocess
-    import sys
-    import os
-    import threading
-    
-    logger.info("🤖 ЗАПУСКАЮ TELEGRAM БОТА В ОТДЕЛЬНОМ ПРОЦЕССЕ...")
-    logger.info(f"🤖 Python executable: {sys.executable}")
-    logger.info(f"🤖 Current directory: {os.getcwd()}")
-    logger.info(f"🤖 main.py exists: {os.path.exists('main.py')}")
-    
-    try:
-        bot_process = subprocess.Popen(
-            [sys.executable, 'main.py'],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,  # Объединяем stderr с stdout
-            text=True,
-            bufsize=1  # Line buffered
-        )
-        logger.info(f"🤖 TELEGRAM БОТ ЗАПУЩЕН (PID: {bot_process.pid})")
-        
-        # Читаем первые несколько строк вывода
-        def log_bot_output():
-            for line in bot_process.stdout:
-                logger.info(f"[BOT] {line.rstrip()}")
-        
-        output_thread = threading.Thread(target=log_bot_output, daemon=True)
-        output_thread.start()
-        logger.info("🤖 ПОТОК ЛОГИРОВАНИЯ БОТА ЗАПУЩЕН")
-        
-    except Exception as e:
-        logger.error(f"❌ КРИТИЧЕСКАЯ ОШИБКА ЗАПУСКА БОТА: {e}")
-        import traceback
-        logger.error(f"❌ Traceback: {traceback.format_exc()}")
-    
-    # ЗАТЕМ запускаем Flask сервер
+    # Railway будет запускать бота отдельно через worker процесс
     logger.info(f"🚀 Запуск Dashboard Server на http://{HOST}:{PORT}")
     logger.info(f"📊 Дашборд доступен по адресу: http://{HOST}:{PORT}")
     logger.info(f"🔧 API эндпоинты:")
