@@ -10,10 +10,10 @@ import logging
 
 # Импортируем Google Calendar сервис
 try:
-    from google_calendar_service import calendar_service
+    from google_calendar_service import GoogleCalendarService
     logging.info("✅ Google Calendar сервис импортирован успешно")
 except Exception as e:
-    calendar_service = None
+    GoogleCalendarService = None
     logging.warning(f"⚠️ Google Calendar сервис не доступен: {e}")
 
 class GoogleSheetsService:
@@ -28,10 +28,21 @@ class GoogleSheetsService:
             self.client = gspread.authorize(creds)
             self.spreadsheet = self.client.open(spreadsheet_id)
             
-            # Calendar API отключен
-            self.calendar_service = None
-            
-            print("Успешное подключение к Google Таблицам. Calendar API отключен.")
+            # Инициализируем Google Calendar API
+            try:
+                if GoogleCalendarService and config.GOOGLE_CALENDAR_ID:
+                    self.calendar_service = GoogleCalendarService(credentials_path, config.GOOGLE_CALENDAR_ID)
+                    print("Успешное подключение к Google Таблицам и Google Calendar.")
+                else:
+                    self.calendar_service = None
+                    if not config.GOOGLE_CALENDAR_ID:
+                        print("Успешное подключение к Google Таблицам. Google Calendar ID не настроен.")
+                    else:
+                        print("Успешное подключение к Google Таблицам. Google Calendar сервис недоступен.")
+            except Exception as calendar_error:
+                logging.warning(f"⚠️ Google Calendar сервис не доступен: {calendar_error}")
+                self.calendar_service = None
+                print("Успешное подключение к Google Таблицам. Calendar API недоступен.")
         except gspread.exceptions.SpreadsheetNotFound:
             print(f"Ошибка: Таблица с названием '{spreadsheet_id}' не найдена. Проверьте GOOGLE_SHEET_NAME в .env файле.")
             raise
@@ -3582,7 +3593,7 @@ class GoogleSheetsService:
             import time
             start_time = time.time()
             
-            if not calendar_service:
+            if not self.calendar_service:
                 return "❌ Google Calendar не настроен. Проверьте GOOGLE_CALENDAR_ID в .env файле."
             
             logging.info("🔄 Начинаю синхронизацию Google Calendar...")
@@ -3671,24 +3682,24 @@ class GoogleSheetsService:
                     circle_name = circle_names_map.get(lesson_data['subscription_id'], 'Неизвестный кружок')
                     
                     # Ищем событие в Google Calendar по ID занятия
-                    existing_event = calendar_service.find_event_by_lesson_id(lesson_data['lesson_id'])
+                    existing_event = self.calendar_service.find_event_by_lesson_id(lesson_data['lesson_id'])
                     
                     if existing_event:
                         # Событие существует - сравниваем переменные
-                        event_variables = calendar_service.extract_lesson_variables_from_event(existing_event)
+                        event_variables = self.calendar_service.extract_lesson_variables_from_event(existing_event)
                         
                         logging.info(f"🔍 Сравнение для занятия {lesson_data['lesson_id']}:")
                         logging.info(f"   📊 Данные из таблицы: {lesson_data}")
                         logging.info(f"   📅 Данные из календаря: {event_variables}")
                         
-                        if calendar_service.compare_lesson_variables(lesson_data, event_variables):
+                        if self.calendar_service.compare_lesson_variables(lesson_data, event_variables):
                             # Все переменные совпадают - игнорируем
                             ignored_count += 1
                             logging.info(f"✅ Занятие {lesson_data['lesson_id']}: все данные совпадают, пропускаем")
                         else:
                             # Есть различия - обновляем событие
                             logging.info(f"🔄 Занятие {lesson_data['lesson_id']}: найдены различия, обновляем событие")
-                            if calendar_service.update_event(existing_event['id'], lesson_data, circle_name):
+                            if self.calendar_service.update_event(existing_event['id'], lesson_data, circle_name):
                                 updated_count += 1
                                 logging.info(f"✅ Занятие {lesson_data['lesson_id']}: событие успешно обновлено")
                             else:
@@ -3700,7 +3711,7 @@ class GoogleSheetsService:
                         logging.info(f"📊 Данные для создания: {lesson_data}")
                         logging.info(f"🎯 Название кружка: {circle_name}")
                         
-                        event_id = calendar_service.create_event(lesson_data, circle_name)
+                        event_id = self.calendar_service.create_event(lesson_data, circle_name)
                         if event_id:
                             created_count += 1
                             logging.info(f"✅ Занятие {lesson_data['lesson_id']}: создано новое событие с ID {event_id}")
@@ -3716,7 +3727,7 @@ class GoogleSheetsService:
             
             # Очищаем дубли занятий после синхронизации
             logging.info("🧹 Проверяю и удаляю дубли занятий...")
-            duplicates_removed = calendar_service.remove_duplicate_lesson_events()
+            duplicates_removed = self.calendar_service.remove_duplicate_lesson_events()
             if duplicates_removed > 0:
                 logging.info(f"🗑️ Удалено {duplicates_removed} дублирующихся событий занятий")
             
@@ -3768,7 +3779,7 @@ class GoogleSheetsService:
             import time
             start_time = time.time()
             
-            if not calendar_service:
+            if not self.calendar_service:
                 return "❌ Google Calendar не настроен. Проверьте GOOGLE_CALENDAR_ID в .env файле."
             
             logging.info("💰 Начинаю синхронизацию прогноза оплат с Google Calendar...")
@@ -3783,7 +3794,7 @@ class GoogleSheetsService:
             if len(forecast_data) <= 1:
                 # Лист пуст - удаляем все события прогноза из календаря
                 logging.info("📭 Лист 'Прогноз' пуст, удаляю все события прогноза из календаря...")
-                deleted_count = calendar_service.delete_all_forecast_events()
+                deleted_count = self.calendar_service.delete_all_forecast_events()
                 
                 if deleted_count > 0:
                     return f"🗑️ **Лист 'Прогноз' пуст**\n\n✅ Удалено {deleted_count} событий прогноза из календаря\n📅 Календарь очищен от всех прогнозов оплат"
@@ -3800,7 +3811,7 @@ class GoogleSheetsService:
             errors = []
             
             # Получаем все существующие события прогноза из календаря
-            all_calendar_events = calendar_service.get_all_events()
+            all_calendar_events = self.calendar_service.get_all_events()
             existing_forecast_events = []
             for event in all_calendar_events:
                 description = event.get('description', '')
@@ -3850,25 +3861,25 @@ class GoogleSheetsService:
                     logging.info(f"💰 Обрабатываю прогноз: {forecast_data_item['child']} - {forecast_data_item['circle']} на {forecast_data_item['payment_date']} (ID: {forecast_data_item['forecast_id']})")
                     
                     # Ищем существующее событие по ID прогноза
-                    existing_event = calendar_service.find_forecast_event_by_id(forecast_data_item['forecast_id'])
+                    existing_event = self.calendar_service.find_forecast_event_by_id(forecast_data_item['forecast_id'])
                     
                     if existing_event:
                         # Событие найдено - сравниваем данные
-                        event_variables = calendar_service.extract_forecast_variables_from_event(existing_event)
+                        event_variables = self.calendar_service.extract_forecast_variables_from_event(existing_event)
                         
                         logging.info(f"🔍 Сравнение для прогноза {forecast_data_item['forecast_id']}:")
                         logging.info(f"   📊 Данные из таблицы: {forecast_data_item}")
                         logging.info(f"   📅 Данные из календаря: {event_variables}")
                         
                         # Сравниваем переменные
-                        if calendar_service.compare_forecast_variables(forecast_data_item, event_variables):
+                        if self.calendar_service.compare_forecast_variables(forecast_data_item, event_variables):
                             # Все данные совпадают - пропускаем
                             ignored_count += 1
                             logging.info(f"✅ Прогноз {forecast_data_item['forecast_id']}: все данные совпадают, пропускаем")
                         else:
                             # Есть различия - обновляем событие
                             logging.info(f"🔄 Прогноз {forecast_data_item['forecast_id']}: найдены различия, обновляем событие")
-                            if calendar_service.update_forecast_event(existing_event['id'], forecast_data_item):
+                            if self.calendar_service.update_forecast_event(existing_event['id'], forecast_data_item):
                                 updated_count += 1
                                 logging.info(f"✅ Прогноз {forecast_data_item['forecast_id']}: событие успешно обновлено")
                             else:
@@ -3879,7 +3890,7 @@ class GoogleSheetsService:
                         logging.info(f"🆕 Прогноз {forecast_data_item['forecast_id']}: событие не найдено, создаю новое")
                         logging.info(f"📊 Данные для создания: {forecast_data_item}")
                         
-                        event_id = calendar_service.create_forecast_event(forecast_data_item)
+                        event_id = self.calendar_service.create_forecast_event(forecast_data_item)
                         if event_id:
                             created_count += 1
                             logging.info(f"✅ Прогноз {forecast_data_item['forecast_id']}: создано новое событие с ID {event_id}")
@@ -3899,7 +3910,7 @@ class GoogleSheetsService:
             
             for event in existing_forecast_events:
                 try:
-                    event_variables = calendar_service.extract_forecast_variables_from_event(event)
+                    event_variables = self.calendar_service.extract_forecast_variables_from_event(event)
                     event_forecast_id = event_variables.get('forecast_id', '')
                     
                     if event_forecast_id and event_forecast_id not in table_forecast_ids:
@@ -3908,8 +3919,8 @@ class GoogleSheetsService:
                         logging.info(f"🗑️ Удаляю лишнее событие прогноза: {event_summary} (ID: {event_forecast_id})")
                         
                         try:
-                            calendar_service.service.events().delete(
-                                calendarId=calendar_service.calendar_id,
+                            self.calendar_service.service.events().delete(
+                                calendarId=self.calendar_service.calendar_id,
                                 eventId=event['id']
                             ).execute()
                             
