@@ -2545,8 +2545,10 @@ async def set_notification_time_handler(update: Update, context: ContextTypes.DE
             # Инициализируем планировщик если он еще не запущен
             global notification_scheduler
             if notification_scheduler is None:
-                from notification_scheduler import get_notification_scheduler
-                notification_scheduler = get_notification_scheduler(context.bot)
+                # ВРЕМЕННО ОТКЛЮЧЕНО для устранения конфликта Railway
+                # from notification_scheduler import get_notification_scheduler
+                # notification_scheduler = get_notification_scheduler(context.bot)
+                notification_scheduler = None
                 
             # Устанавливаем chat_id в планировщик
             if notification_scheduler:
@@ -2624,23 +2626,17 @@ async def test_notifications_handler(update: Update, context: ContextTypes.DEFAU
     try:
         await query.edit_message_text("🧪 <b>Тестирование системы уведомлений</b>\n\n⏳ Ищу занятия на сегодня...", parse_mode='HTML')
         
-        # Импортируем планировщик
-        from notification_scheduler import get_notification_scheduler
-        
-        # Получаем планировщик
-        notification_scheduler = get_notification_scheduler(context.bot)
-        
-        if notification_scheduler is None:
-            notification_scheduler = get_notification_scheduler(context.bot)
+        # ВРЕМЕННО ОТКЛЮЧЕНО для устранения конфликта Railway
+        # from notification_scheduler import get_notification_scheduler
+        # notification_scheduler = get_notification_scheduler(context.bot)
+        # if notification_scheduler is None:
+        #     notification_scheduler = get_notification_scheduler(context.bot)
+        notification_scheduler = None
         
         # Устанавливаем текущий chat_id для тестирования
         current_chat_id = query.message.chat_id
-        notification_scheduler.set_chat_id(current_chat_id)
         
-        # Получаем занятия на сегодня
-        today_lessons = notification_scheduler._get_today_lessons()
-        
-        if not today_lessons:
+        if notification_scheduler is None:
             message_text = "🧪 <b>Результат тестирования</b>\n\n"
             message_text += "📅 На сегодня занятий не найдено или все уже отмечены.\n\n"
             message_text += "💡 <b>Для тестирования:</b>\n"
