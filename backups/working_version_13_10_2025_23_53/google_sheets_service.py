@@ -1,13 +1,12 @@
 import gspread
 from google.oauth2 import service_account
-import json
 import logging
-import os
 from datetime import datetime, timedelta
 import re
 import time
 # Google Calendar API импорты
 import config
+import logging
 
 # Импортируем Google Calendar сервис
 try:
@@ -18,19 +17,16 @@ except Exception as e:
     logging.warning(f"⚠️ Google Calendar сервис не доступен: {e}")
 
 class GoogleSheetsService:
-    def __init__(self, credentials_path, sheet_name):
+    def __init__(self, credentials_path, spreadsheet_id):
         """Инициализация сервиса Google Sheets."""
         try:
-            # ИСПРАВЛЕНО: Возвращаем рабочую логику с правильными scopes
             scope = [
                 'https://www.googleapis.com/auth/spreadsheets',
                 'https://www.googleapis.com/auth/drive'
             ]
             creds = service_account.Credentials.from_service_account_file(credentials_path, scopes=scope)
             self.client = gspread.authorize(creds)
-            self.spreadsheet = self.client.open(sheet_name)
-            
-            logging.info("✅ Google Sheets сервис успешно инициализирован")
+            self.spreadsheet = self.client.open(spreadsheet_id)
             
             # Используем глобальный экземпляр Google Calendar Service
             try:
@@ -50,31 +46,6 @@ class GoogleSheetsService:
         except Exception as e:
             print(f"Ошибка подключения к Google Таблицам: {e}")
             raise
-    
-    def handle_network_error(self, e, operation_name="операции"):
-        """Обрабатывает сетевые ошибки и возвращает понятное сообщение."""
-        import httpx
-        error_msg = str(e)
-        
-        if isinstance(e, httpx.ReadError) or "httpx.ReadError" in error_msg:
-            logging.error(f"🌐 Сетевая ошибка при {operation_name}: {e}")
-            return f"🌐 Сетевая ошибка при {operation_name}. Проверьте подключение к интернету и попробуйте снова."
-        
-        elif "429" in error_msg or "Quota exceeded" in error_msg:
-            logging.error(f"📊 Превышена квота API при {operation_name}: {e}")
-            return f"📊 Превышена квота Google Sheets API. Подождите 1-2 минуты и попробуйте снова."
-        
-        elif "timeout" in error_msg.lower() or "timed out" in error_msg.lower():
-            logging.error(f"⏰ Таймаут при {operation_name}: {e}")
-            return f"⏰ Превышено время ожидания при {operation_name}. Попробуйте еще раз через минуту."
-        
-        elif "503" in error_msg or "Service Unavailable" in error_msg:
-            logging.error(f"🚫 Сервис недоступен при {operation_name}: {e}")
-            return f"🚫 Google Sheets временно недоступен. Попробуйте через несколько минут."
-        
-        else:
-            logging.error(f"❌ Неизвестная ошибка при {operation_name}: {e}")
-            return f"❌ Произошла ошибка при {operation_name}: {error_msg}"
 
     def get_active_subscriptions(self):
         """Загружает все абонементы со статусом 'Активен' или 'Ожидает'."""
@@ -126,18 +97,14 @@ class GoogleSheetsService:
             
             # Получаем информацию об абонементе перед удалением для Google Calendar
             subscription_info = self.get_subscription_details(subscription_id)
-            child_name = subscription_info.get('child_name', '') if subscription_info else ''
-            circle_name = subscription_info.get('circle_name', '') if subscription_info else ''
-            
-            logging.info(f"📋 Информация об абонементе: child_name='{child_name}', circle_name='{circle_name}'")
+            child_name = subscription_info.get('Ребенок', '') if subscription_info else ''
+            circle_name = subscription_info.get('Кружок', '') if subscription_info else ''
             
             deleted_counts = {
                 'Абонементы': 0,
                 'Календарь занятий': 0,
                 'Шаблон расписания': 0,
-                'Прогноз': 0,
-                'Оплачено': 0,
-                'Google Calendar': 0
+                'Прогноз': 0
             }
             
             # 1. Удаляем из листа "Абонементы"
@@ -200,62 +167,6 @@ class GoogleSheetsService:
                 all_values = forecast_sheet.get_all_values()
                 rows_to_delete = []
                 
-                logging.info(f"🔍 ДИАГНОСТИКА УДАЛЕНИЯ ИЗ ПРОГНОЗА:")
-                logging.info(f"  📋 Ищем записи для: '{child_name}' - '{circle_name}'")
-                
-                # Ищем по столбцам "Кружок" и "Ребенок"
-                if len(all_values) > 1:
-                    headers = all_values[0]
-                    circle_col = -1
-                    child_col = -1
-                    
-                    logging.info(f"  📊 Заголовки листа 'Прогноз': {headers}")
-                    
-                    for idx, header in enumerate(headers):
-                        if header == 'Кружок':
-                            circle_col = idx
-                        elif header == 'Ребенок':
-                            child_col = idx
-                    
-                    logging.info(f"  🎯 Столбец 'Кружок': {circle_col}, Столбец 'Ребенок': {child_col}")
-                    
-                    if circle_col >= 0 and child_col >= 0 and child_name and circle_name:
-                        logging.info(f"  🔍 Проверяю {len(all_values)-1} строк данных...")
-                        
-                        for i, row in enumerate(all_values[1:], start=2):
-                            if len(row) > max(circle_col, child_col):
-                                row_circle = row[circle_col].strip() if circle_col < len(row) else ""
-                                row_child = row[child_col].strip() if child_col < len(row) else ""
-                                
-                                logging.info(f"    📝 Строка {i}: Кружок='{row_circle}', Ребенок='{row_child}'")
-                                
-                                # Проверяем точное совпадение
-                                if row_circle == circle_name and row_child == child_name:
-                                    rows_to_delete.append(i)
-                                    logging.info(f"    ✅ НАЙДЕНО СОВПАДЕНИЕ - строка {i} будет удалена")
-                        
-                        logging.info(f"  📊 Найдено строк для удаления: {len(rows_to_delete)}")
-                        
-                        if rows_to_delete:
-                            for row_index in sorted(rows_to_delete, reverse=True):
-                                forecast_sheet.delete_rows(row_index)
-                            deleted_counts['Прогноз'] = len(rows_to_delete)
-                            logging.info(f"✅ Удалено {len(rows_to_delete)} записей из 'Прогноз'")
-                        else:
-                            logging.warning("⚠️ Нет записей для удаления в 'Прогноз' - проверьте точность имен")
-                    else:
-                        logging.warning(f"⚠️ Проблема с поиском: circle_col={circle_col}, child_col={child_col}, child_name='{child_name}', circle_name='{circle_name}'")
-                else:
-                    logging.warning("⚠️ Лист 'Прогноз' пуст или нет заголовков")
-            except Exception as e:
-                logging.error(f"❌ Ошибка при удалении из 'Прогноз': {e}")
-
-            # 5. Удаляем из листа "Оплачено"
-            try:
-                paid_sheet = self.spreadsheet.worksheet("Оплачено")
-                all_values = paid_sheet.get_all_values()
-                rows_to_delete = []
-                
                 # Ищем по столбцам "Кружок" и "Ребенок"
                 if len(all_values) > 1:
                     headers = all_values[0]
@@ -277,76 +188,15 @@ class GoogleSheetsService:
                         
                         if rows_to_delete:
                             for row_index in sorted(rows_to_delete, reverse=True):
-                                paid_sheet.delete_rows(row_index)
-                            deleted_counts['Оплачено'] = len(rows_to_delete)
-                            logging.info(f"✅ Удалено {len(rows_to_delete)} записей из 'Оплачено'")
+                                forecast_sheet.delete_rows(row_index)
+                            deleted_counts['Прогноз'] = len(rows_to_delete)
+                            logging.info(f"✅ Удалено {len(rows_to_delete)} записей из 'Прогноз'")
                         else:
-                            logging.info("ℹ️ Нет записей для удаления в 'Оплачено'")
+                            logging.info("ℹ️ Нет записей для удаления в 'Прогноз'")
                     else:
-                        logging.warning("⚠️ Не удалось определить столбцы или данные для удаления из 'Оплачено'")
+                        logging.warning("⚠️ Не удалось определить столбцы или данные для удаления из 'Прогноз'")
             except Exception as e:
-                logging.error(f"❌ Ошибка при удалении из 'Оплачено': {e}")
-
-            # 6. Удаляем события из Google Calendar (по содержимому: имя ребенка, кружок, ID абонемента)
-            calendar_errors = []
-            try:
-                if self.calendar_service and child_name and circle_name:
-                    logging.info(f"🗓️ Удаляю события из Google Calendar для {child_name} - {circle_name} (ID: {subscription_id})")
-                    
-                    # Попытки удаления с повторами при сетевых ошибках
-                    max_retries = 3
-                    calendar_result = None
-                    
-                    for attempt in range(max_retries):
-                        try:
-                            calendar_result = self.calendar_service.delete_subscription_events(
-                                child_name, circle_name, subscription_id
-                            )
-                            break  # Успешно - выходим из цикла
-                            
-                        except Exception as calendar_error:
-                            error_msg = str(calendar_error)
-                            if "Connection reset by peer" in error_msg or "timeout" in error_msg.lower():
-                                logging.warning(f"🌐 Сетевая ошибка при удалении из Calendar (попытка {attempt + 1}/{max_retries}): {calendar_error}")
-                                if attempt < max_retries - 1:
-                                    import time
-                                    time.sleep(2 ** attempt)  # Экспоненциальная задержка: 1s, 2s, 4s
-                                    continue
-                            raise calendar_error  # Не сетевая ошибка - пробрасываем дальше
-                    
-                    if calendar_result:
-                        if isinstance(calendar_result, dict):
-                            calendar_deleted = calendar_result.get('deleted_count', 0)
-                            calendar_success = calendar_result.get('success', True)
-                            
-                            if calendar_success and calendar_deleted > 0:
-                                deleted_counts['Google Calendar'] = calendar_deleted
-                                logging.info(f"✅ Удалено {calendar_deleted} событий из Google Calendar")
-                            elif not calendar_success:
-                                calendar_errors.append(f"Ошибка удаления из Calendar: {calendar_result.get('message', 'Неизвестная ошибка')}")
-                                logging.warning(f"⚠️ Не удалось удалить события из Google Calendar")
-                            else:
-                                logging.info("ℹ️ Нет событий для удаления в Google Calendar")
-                        else:
-                            # Для обратной совместимости, если возвращается число
-                            if calendar_result and calendar_result > 0:
-                                deleted_counts['Google Calendar'] = calendar_result
-                                logging.info(f"✅ Удалено {calendar_result} событий из Google Calendar")
-                            else:
-                                logging.info("ℹ️ Нет событий для удаления в Google Calendar")
-                    else:
-                        calendar_errors.append("Не удалось получить результат удаления из Google Calendar")
-                elif not child_name or not circle_name:
-                    logging.warning(f"⚠️ Недостаточно данных для удаления из Google Calendar: child_name='{child_name}', circle_name='{circle_name}'")
-                    calendar_errors.append(f"Недостаточно данных для поиска событий (ребенок: '{child_name}', кружок: '{circle_name}')")
-                else:
-                    logging.warning("⚠️ Google Calendar сервис недоступен")
-                    calendar_errors.append("Google Calendar сервис недоступен")
-                    
-            except Exception as e:
-                error_message = self.handle_network_error(e, "удалении из Google Calendar")
-                calendar_errors.append(error_message)
-                logging.error(f"❌ Критическая ошибка при удалении из Google Calendar: {e}")
+                logging.error(f"❌ Ошибка при удалении из 'Прогноз': {e}")
 
             # Формируем отчет об удалении
             total_deleted = sum(deleted_counts.values())
@@ -359,18 +209,9 @@ class GoogleSheetsService:
             if total_deleted == 0:
                 report_lines.append("⚠️ Данные не найдены в таблицах")
             
-            # Добавляем информацию об ошибках Google Calendar
-            if calendar_errors:
-                report_lines.append("")
-                report_lines.append("⚠️ **Проблемы с Google Calendar:**")
-                for error in calendar_errors:
-                    report_lines.append(f"• {error}")
-                report_lines.append("")
-                report_lines.append("🔄 **Рекомендация:** Проверьте Google Calendar вручную и удалите события абонемента при необходимости.")
-            
             # Возвращаем информацию для Google Calendar
             result_message = "\n".join(report_lines)
-            logging.info(f"🎯 Удаление завершено: {total_deleted} записей, ошибок Calendar: {len(calendar_errors)}")
+            logging.info(f"🎯 Удаление завершено: {total_deleted} записей")
             
             return {
                 'success': True,
@@ -378,252 +219,18 @@ class GoogleSheetsService:
                 'child_name': child_name,
                 'circle_name': circle_name,
                 'subscription_id': subscription_id,
-                'deleted_counts': deleted_counts,
-                'calendar_errors': calendar_errors
+                'deleted_counts': deleted_counts
             }
 
         except Exception as e:
-            # Используем нашу улучшенную обработку ошибок
-            error_message = self.handle_network_error(e, "удалении абонемента")
             logging.error(f"❌ Критическая ошибка при удалении абонемента {subscription_id}: {e}")
             return {
                 'success': False,
-                'message': error_message,
-                'child_name': child_name if 'child_name' in locals() else '',
-                'circle_name': circle_name if 'circle_name' in locals() else '',
+                'message': f"❌ Произошла ошибка при удалении: {e}",
+                'child_name': '',
+                'circle_name': '',
                 'subscription_id': subscription_id,
                 'deleted_counts': {}
-            }
-    
-    def manual_calendar_cleanup(self, child_name, circle_name):
-        """Ручная очистка событий из Google Calendar для конкретного ребенка и кружка."""
-        try:
-            if not self.calendar_service:
-                return "❌ Google Calendar сервис недоступен"
-            
-            logging.info(f"🧹 Ручная очистка Google Calendar для {child_name} - {circle_name}")
-            
-            # Получаем все события календаря
-            events_result = self.calendar_service.service.events().list(
-                calendarId=self.calendar_service.calendar_id,
-                maxResults=2500,
-                singleEvents=True,
-                orderBy='startTime'
-            ).execute()
-            
-            events = events_result.get('items', [])
-            logging.info(f"📊 Найдено {len(events)} событий в календаре")
-            
-            deleted_count = 0
-            errors = []
-            
-            # Ищем события этого ребенка и кружка
-            for event in events:
-                try:
-                    summary = event.get('summary', '')
-                    description = event.get('description', '')
-                    
-                    # Проверяем, относится ли событие к удаляемому абонементу
-                    if (child_name in summary and circle_name in summary) or \
-                       (child_name in description and circle_name in description):
-                        
-                        event_id = event['id']
-                        
-                        # Удаляем событие
-                        self.calendar_service.service.events().delete(
-                            calendarId=self.calendar_service.calendar_id,
-                            eventId=event_id
-                        ).execute()
-                        
-                        deleted_count += 1
-                        logging.info(f"✅ Удалено событие: {summary}")
-                        
-                        # Небольшая задержка между удалениями
-                        import time
-                        time.sleep(0.2)
-                        
-                except Exception as e:
-                    error_msg = f"Ошибка при удалении события {event.get('id', 'unknown')}: {e}"
-                    logging.error(f"❌ {error_msg}")
-                    errors.append(error_msg)
-                    continue
-            
-            # Формируем результат
-            if deleted_count > 0:
-                message = f"✅ Ручная очистка завершена!\n\n🗑️ Удалено {deleted_count} событий для '{child_name} - {circle_name}'"
-                if errors:
-                    message += f"\n⚠️ Ошибок: {len(errors)}"
-            else:
-                message = f"ℹ️ События для '{child_name} - {circle_name}' не найдены в Google Calendar"
-            
-            logging.info(f"🎯 Ручная очистка завершена: {deleted_count} удалено, {len(errors)} ошибок")
-            
-            return message
-            
-        except Exception as e:
-            error_msg = f"❌ Критическая ошибка при ручной очистке Google Calendar: {e}"
-            logging.error(error_msg)
-            return error_msg
-    
-    def debug_forecast_data(self, child_name=None, circle_name=None):
-        """Отладочная функция для просмотра данных в листе Прогноз."""
-        try:
-            forecast_sheet = self.spreadsheet.worksheet("Прогноз")
-            all_values = forecast_sheet.get_all_values()
-            
-            if not all_values:
-                return "Лист 'Прогноз' пуст"
-            
-            headers = all_values[0]
-            logging.info(f"📊 Заголовки листа 'Прогноз': {headers}")
-            
-            # Находим столбцы
-            circle_col = child_col = -1
-            for idx, header in enumerate(headers):
-                if header == 'Кружок':
-                    circle_col = idx
-                elif header == 'Ребенок':
-                    child_col = idx
-            
-            result_lines = [
-                f"📋 ДАННЫЕ В ЛИСТЕ 'ПРОГНОЗ':",
-                f"🎯 Столбец 'Кружок': {circle_col}, Столбец 'Ребенок': {child_col}",
-                ""
-            ]
-            
-            if child_name and circle_name:
-                result_lines.append(f"🔍 Ищем записи для: '{child_name}' - '{circle_name}'")
-                result_lines.append("")
-            
-            # Показываем все данные
-            for i, row in enumerate(all_values[1:], start=2):
-                if len(row) > max(circle_col, child_col) if circle_col >= 0 and child_col >= 0 else True:
-                    row_circle = row[circle_col].strip() if circle_col >= 0 and circle_col < len(row) else "N/A"
-                    row_child = row[child_col].strip() if child_col >= 0 and child_col < len(row) else "N/A"
-                    
-                    match_indicator = ""
-                    if child_name and circle_name:
-                        if row_circle == circle_name and row_child == child_name:
-                            match_indicator = " ✅ СОВПАДЕНИЕ"
-                        else:
-                            match_indicator = " ❌"
-                    
-                    result_lines.append(f"Строка {i}: Кружок='{row_circle}', Ребенок='{row_child}'{match_indicator}")
-            
-            return "\n".join(result_lines)
-            
-        except Exception as e:
-            return f"❌ Ошибка при чтении листа 'Прогноз': {e}"
-    
-    def get_subscription_deletion_preview(self, subscription_id):
-        """Показывает предварительный просмотр того, что будет удалено."""
-        try:
-            logging.info(f"🔍 Анализ данных для удаления абонемента {subscription_id}")
-            
-            # Получаем информацию об абонементе
-            subscription_info = self.get_subscription_details(subscription_id)
-            if not subscription_info:
-                return {
-                    'success': False,
-                    'message': f"❌ Абонемент {subscription_id} не найден"
-                }
-            
-            child_name = subscription_info.get('Ребенок', '')
-            circle_name = subscription_info.get('Кружок', '')
-            
-            preview_counts = {
-                'Абонементы': 0,
-                'Календарь занятий': 0,
-                'Шаблон расписания': 0,
-                'Прогноз': 0,
-                'Оплачено': 0
-            }
-            
-            # Подсчитываем записи в каждом листе
-            sheets_to_check = [
-                ('Календарь занятий', 'B', subscription_id),
-                ('Шаблон расписания', 'B', subscription_id)
-            ]
-            
-            for sheet_name, column, search_value in sheets_to_check:
-                try:
-                    sheet = self.spreadsheet.worksheet(sheet_name)
-                    all_values = sheet.get_all_values()
-                    count = 0
-                    
-                    for row in all_values[1:]:  # Пропускаем заголовки
-                        if len(row) > 1 and row[1] == str(search_value):
-                            count += 1
-                    
-                    preview_counts[sheet_name] = count
-                except Exception as e:
-                    logging.error(f"❌ Ошибка при подсчете в {sheet_name}: {e}")
-            
-            # Подсчитываем в листах Прогноз и Оплачено по имени и кружку
-            for sheet_name in ['Прогноз', 'Оплачено']:
-                try:
-                    sheet = self.spreadsheet.worksheet(sheet_name)
-                    all_values = sheet.get_all_values()
-                    count = 0
-                    
-                    if len(all_values) > 1:
-                        headers = all_values[0]
-                        circle_col = child_col = -1
-                        
-                        for idx, header in enumerate(headers):
-                            if header == 'Кружок':
-                                circle_col = idx
-                            elif header == 'Ребенок':
-                                child_col = idx
-                        
-                        if circle_col >= 0 and child_col >= 0:
-                            for row in all_values[1:]:
-                                if (len(row) > max(circle_col, child_col) and 
-                                    row[circle_col] == circle_name and 
-                                    row[child_col] == child_name):
-                                    count += 1
-                    
-                    preview_counts[sheet_name] = count
-                except Exception as e:
-                    logging.error(f"❌ Ошибка при подсчете в {sheet_name}: {e}")
-            
-            # Абонемент всегда 1 (если найден)
-            preview_counts['Абонементы'] = 1
-            
-            # Формируем отчет
-            total_to_delete = sum(preview_counts.values())
-            preview_lines = [
-                f"📋 **Предварительный просмотр удаления абонемента `{subscription_id}`**",
-                f"👤 **Ребенок:** {child_name}",
-                f"🎨 **Кружок:** {circle_name}",
-                "",
-                "🗑️ **Будет удалено:**"
-            ]
-            
-            for sheet_name, count in preview_counts.items():
-                if count > 0:
-                    preview_lines.append(f"• {sheet_name}: {count} записей")
-            
-            if total_to_delete == 0:
-                preview_lines.append("⚠️ Данные для удаления не найдены")
-            else:
-                preview_lines.append(f"\n📊 **Всего записей к удалению:** {total_to_delete}")
-                preview_lines.append("\n⚠️ **Внимание:** Это действие необратимо!")
-            
-            return {
-                'success': True,
-                'message': "\n".join(preview_lines),
-                'child_name': child_name,
-                'circle_name': circle_name,
-                'total_to_delete': total_to_delete,
-                'preview_counts': preview_counts
-            }
-            
-        except Exception as e:
-            error_message = self.handle_network_error(e, "анализе данных для удаления")
-            return {
-                'success': False,
-                'message': error_message
             }
             
     def get_next_lesson_id(self):
@@ -769,35 +376,14 @@ class GoogleSheetsService:
             
             subs_sheet.append_row(new_row, value_input_option='USER_ENTERED')
             
-            # Создаем прогноз оплат только для НЕ разовых абонементов
-            if sub_data['sub_type'].lower() != 'разовый':
-                logging.info(f"📊 Создаю прогноз оплат для абонемента типа '{sub_data['sub_type']}'")
-                self.create_payment_forecast(sub_id, sub_data)
-            else:
-                logging.info(f"🎯 Пропускаю создание прогноза для разового абонемента '{sub_id}'")
+            # Создаем прогноз оплат для этого абонемента
+            self.create_payment_forecast(sub_id, sub_data)
             
             return f"✅ Абонемент и расписание успешно созданы!\n\nID: `{sub_id}`"
 
         except Exception as e:
-            import httpx
-            error_msg = str(e)
-            
-            # Обработка специфичных сетевых ошибок
-            if isinstance(e, httpx.ReadError) or "httpx.ReadError" in error_msg:
-                logging.error(f"🌐 Сетевая ошибка при создании абонемента: {e}")
-                return f"❌ Сетевая ошибка при сохранении в Google Sheets.\n\n🔄 Попробуйте создать абонемент еще раз через 30-60 секунд.\n\n📡 Возможные причины:\n• Временные проблемы с интернетом\n• Перегрузка Google Sheets API\n• Таймаут соединения"
-            
-            elif "429" in error_msg or "Quota exceeded" in error_msg:
-                logging.error(f"📊 Превышена квота API при создании абонемента: {e}")
-                return f"❌ Превышена квота Google Sheets API.\n\n⏰ Подождите 1-2 минуты и попробуйте снова.\n\n📈 Система временно ограничивает количество запросов."
-            
-            elif "timeout" in error_msg.lower() or "timed out" in error_msg.lower():
-                logging.error(f"⏰ Таймаут при создании абонемента: {e}")
-                return f"❌ Превышено время ожидания ответа от Google Sheets.\n\n🔄 Попробуйте еще раз через минуту.\n\n⚡ Возможно, сервер временно перегружен."
-            
-            else:
-                logging.error(f"❌ Критическая ошибка при создании абонемента: {e}", exc_info=True)
-                return f"❌ Произошла ошибка при создании абонемента.\n\n🔧 Детали: {error_msg}\n\n📞 Обратитесь к администратору, если ошибка повторяется."
+            logging.error(f"Критическая ошибка при создании абонемента: {e}", exc_info=True)
+            return f"❌ Произошла ошибка: {e}"
     
     def create_payment_forecast(self, sub_id, sub_data):
         """Создает прогноз оплат для абонемента - обновление прогноза выполняется в фоне."""
@@ -899,12 +485,6 @@ class GoogleSheetsService:
                     cost = 0
                 end_date_str = str(row[11]).strip() if len(row) > 11 else ""  # L:L = индекс 11
                 sub_id = str(row[1]).strip()  # B:B = индекс 1
-                subscription_type = str(row[13]).strip().lower() if len(row) > 13 else ""  # N:N = индекс 13 (Тип абонемента)
-                
-                # Пропускаем разовые абонементы - для них прогноз не создается
-                if subscription_type == 'разовый':
-                    logging.info(f"🎯 Пропускаю разовый абонемент {sub_id} при создании прогноза")
-                    continue
                 
                 if not child_name or not circle_name or not end_date_str or not sub_id:
                     logging.debug(f"Строка {i}: пропускаем из-за пустых данных - ребенок:'{child_name}', кружок:'{circle_name}', дата:'{end_date_str}', ID:'{sub_id}'")
@@ -1357,8 +937,8 @@ class GoogleSheetsService:
             from datetime import datetime, timedelta
             import traceback
             
-            logging.info("🔒 БЕЗОПАСНАЯ ФУНКЦИЯ update_subscriptions_statistics() - ID в календаре НЕ изменяются!")
-            logging.info("✅ ИСПРАВЛЕНО: Функция больше НЕ удаляет и НЕ пересоздает календарь занятий")
+            logging.warning("🚨 ВЫЗВАНА ФУНКЦИЯ update_subscriptions_statistics() - ЭТО МОЖЕТ ИЗМЕНИТЬ НОМЕРА В КАЛЕНДАРЕ!")
+            logging.warning(f"🔍 Стек вызовов:\n{''.join(traceback.format_stack())}")
             
             logging.info("=== НАЧАЛО ОБНОВЛЕНИЯ СТАТИСТИКИ АБОНЕМЕНТОВ ===")
             
@@ -1514,11 +1094,7 @@ class GoogleSheetsService:
                     
                     last_generated_date = subscription_stats[sub_id]['last_lesson_date']
                     
-                    # Для разовых абонементов не генерируем дополнительные занятия
-                    subscription_type = sub_info.get('subscription_type', '').lower()
-                    if subscription_type == 'разовый':
-                        logging.info(f"🎯 Пропускаю генерацию дополнительных занятий для разового абонемента {sub_id}")
-                    elif remaining_classes > 0 and sub_id in templates:
+                    if remaining_classes > 0 and sub_id in templates:
                         # Определяем дату начала генерации
                         start_date = subscription_stats[sub_id]['last_lesson_date']
                         if start_date is None:
@@ -1622,15 +1198,50 @@ class GoogleSheetsService:
             # Шаг 5: Запись данных в календарь с сохранением ID событий
             logging.info("Шаг 5: Запись обновленного календаря с сохранением ID событий...")
             
-            # ИСПРАВЛЕНО: НЕ УДАЛЯЕМ СУЩЕСТВУЮЩИЕ ДАННЫЕ, ТОЛЬКО ОБНОВЛЯЕМ СТАТИСТИКУ
-            logging.info("🔒 ЗАЩИТА ID: Обновляем только статистику абонементов, НЕ трогая календарь занятий")
-            
-            # Получаем текущие данные календаря для проверки
+            # Сохранение ID событий удалено (Google Calendar отключен)
             all_data = calendar_sheet.get_all_values()
-            logging.info(f"📊 Текущее состояние календаря: {len(all_data)-1} занятий (ID сохранены)")
             
-            # ВАЖНО: Календарь занятий НЕ пересоздается, ID остаются неизменными!
-            # Статистика обновляется только в листе "Абонементы"
+            if len(all_data) > 1:
+                # Удаляем все строки кроме заголовков (начиная со строки 2)
+                calendar_sheet.delete_rows(2, len(all_data))
+            
+            # Сохраняем существующие ID занятий и присваиваем новые только новым занятиям
+            if new_calendar:
+                # Подготавливаем данные занятий без заголовков
+                calendar_data_with_headers = []
+                
+                # Находим максимальный существующий ID для новых занятий
+                max_existing_id = 0
+                existing_ids = set()
+                
+                for row in new_calendar:
+                    if row[0] and str(row[0]).strip() and str(row[0]).strip().isdigit():
+                        lesson_id = int(row[0])
+                        existing_ids.add(lesson_id)
+                        max_existing_id = max(max_existing_id, lesson_id)
+                
+                # Присваиваем ID только тем занятиям, у которых его нет
+                next_new_id = max_existing_id + 1
+                
+                for row in new_calendar:
+                    # Если ID уже есть и он валидный - сохраняем его
+                    if row[0] and str(row[0]).strip() and str(row[0]).strip().isdigit():
+                        # ID уже есть, оставляем как есть
+                        pass
+                    else:
+                        # Нет ID - присваиваем новый уникальный
+                        while next_new_id in existing_ids:
+                            next_new_id += 1
+                        row[0] = next_new_id
+                        existing_ids.add(next_new_id)
+                        next_new_id += 1
+                    
+                    # Восстановление ID событий удалено (Google Calendar отключен)
+                    
+                    calendar_data_with_headers.append(row)
+                
+                calendar_sheet.append_rows(calendar_data_with_headers, value_input_option='RAW')
+                logging.info(f"Записано {len(new_calendar)} строк в календарь занятий с сохранением ID занятий")
             
             logging.info("=== ЗАВЕРШЕНИЕ ОБНОВЛЕНИЯ СТАТИСТИКИ АБОНЕМЕНТОВ ===")
             logging.info(f"Обновлено абонементов: {updated_subscriptions}")
@@ -1640,56 +1251,6 @@ class GoogleSheetsService:
         except Exception as e:
             logging.error(f"Критическая ошибка при обновлении статистики абонементов: {e}", exc_info=True)
             return 0, [f"Критическая ошибка: {e}"]
-    
-    def verify_lesson_ids_integrity(self):
-        """Проверяет целостность ID в календаре занятий (не изменяет данные)."""
-        try:
-            logging.info("🔍 Проверка целостности ID в календаре занятий...")
-            
-            calendar_sheet = self.spreadsheet.worksheet("Календарь занятий")
-            data = calendar_sheet.get_all_values()
-            
-            if len(data) <= 1:
-                return {"status": "empty", "message": "Календарь занятий пуст"}
-            
-            ids = []
-            duplicates = []
-            invalid_ids = []
-            
-            for i, row in enumerate(data[1:], 2):  # Начинаем с 2-й строки
-                if len(row) > 0:
-                    lesson_id = str(row[0]).strip()
-                    if lesson_id:
-                        if lesson_id.isdigit():
-                            id_num = int(lesson_id)
-                            if id_num in ids:
-                                duplicates.append({"row": i, "id": id_num})
-                            else:
-                                ids.append(id_num)
-                        else:
-                            invalid_ids.append({"row": i, "id": lesson_id})
-                    else:
-                        invalid_ids.append({"row": i, "id": "пустой"})
-            
-            result = {
-                "status": "checked",
-                "total_lessons": len(data) - 1,
-                "valid_ids": len(ids),
-                "duplicates": duplicates,
-                "invalid_ids": invalid_ids,
-                "id_range": f"{min(ids) if ids else 0}-{max(ids) if ids else 0}"
-            }
-            
-            if duplicates or invalid_ids:
-                logging.warning(f"⚠️ Найдены проблемы с ID: дубли={len(duplicates)}, невалидные={len(invalid_ids)}")
-            else:
-                logging.info("✅ Все ID в календаре занятий корректны и уникальны")
-            
-            return result
-            
-        except Exception as e:
-            logging.error(f"❌ Ошибка при проверке целостности ID: {e}")
-            return {"status": "error", "message": str(e)}
 
     def create_visual_calendar(self):
         """Создает визуальный календарь согласно ТЗ."""
@@ -2446,263 +2007,12 @@ class GoogleSheetsService:
             calendar_sheet.update_cell(lesson_row, 5, new_status)
             logging.info(f"Обновлен статус для занятия {lesson_id}: {new_status}")
             
-            # Проверяем, нужно ли создать новое занятие при отмене, переносе или пропуске по вине
-            if mark.lower() in ['пропуск (по вине)', 'отмена (болезнь)', 'отмена (другое)', 'перенос']:
-                # Получаем данные отмененного занятия
-                canceled_lesson_data = data[lesson_row - 1]  # -1 потому что lesson_row начинается с 1
-                subscription_id = canceled_lesson_data[1]  # B:B - ID абонемента
-                child_name = canceled_lesson_data[5]  # F:F - Ребенок
-                
-                # Проверяем тип абонемента
-                subscription_info = self.get_subscription_details(subscription_id)
-                if subscription_info:
-                    subscription_type = subscription_info.get('subscription_type', '').lower()
-                    
-                    if subscription_type == 'разовый':
-                        logging.info(f"🎯 Разовый абонемент {subscription_id} требует выбора даты для переноса")
-                        
-                        # Обновляем статистику пропущенных занятий для разового абонемента
-                        if mark.lower() in ['пропуск (по вине)', 'отмена (болезнь)', 'отмена (другое)', 'перенос']:
-                            self._update_razoviy_missed_classes_stats(subscription_id)
-                        
-                        # Возвращаем специальный статус для разовых абонементов
-                        return {
-                            'status': 'needs_date_selection',
-                            'subscription_id': subscription_id,
-                            'child_name': child_name,
-                            'lesson_data': {
-                                'lesson_id': lesson_id,
-                                'date': canceled_lesson_data[2],  # C:C - Дата занятия
-                                'start_time': canceled_lesson_data[3],  # D:D - Время начала
-                                'end_time': canceled_lesson_data[7],  # H:H - Время завершения
-                                'mark': mark
-                            }
-                        }
-                    else:
-                        logging.info(f"Обнаружена отмена/перенос занятия {lesson_id}, создаю замещающее занятие...")
-                        
-                        # Создаем новое занятие взамен отмененного
-                        replacement_created = self._create_replacement_lesson(subscription_id, child_name)
-                        if replacement_created:
-                            logging.info(f"✅ Создано замещающее занятие для абонемента {subscription_id}")
-                        else:
-                            logging.warning(f"⚠️ Не удалось создать замещающее занятие для абонемента {subscription_id}")
-                else:
-                    logging.warning(f"⚠️ Не удалось получить информацию об абонементе {subscription_id}")
-            
             # Синхронизация календаря будет выполнена в фоновом процессе
             logging.info("Отметка сохранена, синхронизация календаря будет выполнена в фоне")
             
             return True
         except Exception as e:
-            import httpx
-            error_msg = str(e)
-            
-            # Обработка специфичных сетевых ошибок
-            if isinstance(e, httpx.ReadError) or "httpx.ReadError" in error_msg:
-                logging.error(f"🌐 Сетевая ошибка при обновлении отметки занятия {lesson_id}: {e}")
-                return False
-            elif "429" in error_msg or "Quota exceeded" in error_msg:
-                logging.error(f"📊 Превышена квота API при обновлении отметки занятия {lesson_id}: {e}")
-                return False
-            elif "timeout" in error_msg.lower():
-                logging.error(f"⏰ Таймаут при обновлении отметки занятия {lesson_id}: {e}")
-                return False
-            else:
-                logging.error(f"❌ Ошибка при обновлении отметки занятия {lesson_id}: {e}")
-                return False
-
-    def _create_replacement_lesson(self, subscription_id, child_name):
-        """Создает замещающее занятие при отмене, основываясь на шаблоне расписания."""
-        try:
-            from datetime import datetime, timedelta
-            
-            # Получаем шаблон расписания для абонемента
-            template_sheet = self.spreadsheet.worksheet("Шаблон расписания")
-            template_data = template_sheet.get_all_values()
-            
-            # Ищем шаблон для данного абонемента
-            schedule_template = []
-            for row in template_data[1:]:  # Пропускаем заголовки
-                if len(row) >= 5 and str(row[1]).strip() == subscription_id:  # B:B - ID абонемента
-                    try:
-                        day_of_week = int(row[2]) - 1  # C:C - День недели (конвертируем в Python формат 0-6)
-                        start_time = str(row[3]).strip()  # D:D - Время начала
-                        end_time = str(row[4]).strip()  # E:E - Время завершения
-                        
-                        schedule_template.append({
-                            'day': day_of_week % 7,  # Обеспечиваем корректный диапазон 0-6
-                            'start_time': start_time,
-                            'end_time': end_time
-                        })
-                    except (ValueError, IndexError):
-                        continue
-            
-            if not schedule_template:
-                logging.warning(f"Шаблон расписания для абонемента {subscription_id} не найден")
-                return False
-            
-            # Получаем календарь занятий для определения последней даты
-            calendar_sheet = self.spreadsheet.worksheet("Календарь занятий")
-            calendar_data = calendar_sheet.get_all_values()
-            
-            # Находим последнее занятие этого абонемента
-            last_lesson_date = None
-            for row in calendar_data[1:]:  # Пропускаем заголовки
-                if len(row) >= 6 and str(row[1]).strip() == subscription_id:  # B:B - ID абонемента
-                    try:
-                        lesson_date_str = str(row[2]).strip()  # C:C - Дата занятия
-                        lesson_date = datetime.strptime(lesson_date_str, '%d.%m.%Y')
-                        if last_lesson_date is None or lesson_date > last_lesson_date:
-                            last_lesson_date = lesson_date
-                    except ValueError:
-                        continue
-            
-            # Если нет предыдущих занятий, начинаем с сегодняшней даты
-            if last_lesson_date is None:
-                start_date = datetime.now()
-            else:
-                start_date = last_lesson_date + timedelta(days=1)
-            
-            # Ищем следующую подходящую дату по шаблону
-            current_date = start_date
-            max_attempts = 60  # Ищем не более 60 дней вперед
-            attempts = 0
-            
-            while attempts < max_attempts:
-                day_of_week = current_date.weekday()
-                
-                # Проверяем, есть ли занятие в этот день недели по шаблону
-                for template_item in schedule_template:
-                    if day_of_week == template_item['day']:
-                        # Создаем новое занятие
-                        return self._add_lesson_to_calendar(
-                            subscription_id,
-                            child_name,
-                            current_date,
-                            template_item['start_time'],
-                            template_item['end_time']
-                        )
-                
-                current_date += timedelta(days=1)
-                attempts += 1
-            
-            logging.warning(f"Не удалось найти подходящую дату для замещающего занятия абонемента {subscription_id}")
-            return False
-            
-        except Exception as e:
-            logging.error(f"❌ Ошибка при создании замещающего занятия: {e}")
-            return False
-
-    def _add_lesson_to_calendar(self, subscription_id, child_name, lesson_date, start_time, end_time):
-        """Добавляет новое занятие в календарь занятий."""
-        try:
-            calendar_sheet = self.spreadsheet.worksheet("Календарь занятий")
-            
-            # Получаем следующий ID для занятия
-            all_data = calendar_sheet.get_all_values()
-            next_id = len(all_data)  # Простой способ получить следующий ID
-            
-            # Получаем информацию об абонементе для определения кружка
-            subscription_info = self.get_subscription_details(subscription_id)
-            circle_name = subscription_info.get('circle_name', '') if subscription_info else ''
-            
-            # Формируем новую строку занятия
-            new_lesson = [
-                str(next_id),  # A:A - № (ID занятия)
-                subscription_id,  # B:B - ID абонемента
-                lesson_date.strftime('%d.%m.%Y'),  # C:C - Дата занятия
-                self.format_time(start_time),  # D:D - Время начала
-                'Запланировано',  # E:E - Статус посещения
-                child_name,  # F:F - Ребенок
-                '',  # G:G - Отметка (пустая для нового занятия)
-                self.format_time(end_time)  # H:H - Время завершения
-            ]
-            
-            # Добавляем строку в календарь
-            calendar_sheet.append_row(new_lesson)
-            
-            logging.info(f"✅ Добавлено замещающее занятие: ID={next_id}, Дата={lesson_date.strftime('%d.%m.%Y')}, Ребенок={child_name}")
-            
-            # Создаем событие в Google Calendar, если сервис доступен
-            if self.calendar_service:
-                try:
-                    # Формируем данные для создания события в формате, который ожидает create_event
-                    lesson_data = {
-                        'child': child_name,
-                        'date': lesson_date.strftime('%d.%m.%Y'),
-                        'start_time': start_time,
-                        'end_time': end_time,
-                        'mark': ''  # Пустая отметка для нового занятия
-                    }
-                    
-                    event_created = self.calendar_service.create_event(lesson_data, circle_name)
-                    if event_created:
-                        logging.info(f"✅ Создано событие в Google Calendar для замещающего занятия")
-                except Exception as calendar_error:
-                    logging.warning(f"⚠️ Не удалось создать событие в Google Calendar: {calendar_error}")
-            
-            return True
-            
-        except Exception as e:
-            logging.error(f"❌ Ошибка при добавлении занятия в календарь: {e}")
-            return False
-
-    def _update_razoviy_missed_classes_stats(self, subscription_id):
-        """Обновляет статистику пропущенных занятий для разового абонемента."""
-        try:
-            subs_sheet = self.spreadsheet.worksheet("Абонементы")
-            data = subs_sheet.get_all_values()
-            
-            # Находим строку с нужным абонементом
-            for i, row in enumerate(data[1:], 2):  # Начинаем с 2-й строки
-                if len(row) > 1 and str(row[1]).strip() == str(subscription_id).strip():  # B:B - ID абонемента
-                    # Получаем текущее значение пропущенных занятий (столбец M = индекс 12)
-                    current_missed = int(row[12]) if len(row) > 12 and row[12] and str(row[12]).isdigit() else 0
-                    new_missed = current_missed + 1
-                    
-                    # Обновляем столбец M (пропущенные занятия)
-                    subs_sheet.update_cell(i, 13, new_missed)  # 13 = столбец M
-                    logging.info(f"✅ Обновлена статистика разового абонемента {subscription_id}: пропущено {new_missed}")
-                    return True
-            
-            logging.warning(f"⚠️ Абонемент {subscription_id} не найден для обновления статистики")
-            return False
-            
-        except Exception as e:
-            logging.error(f"❌ Ошибка при обновлении статистики разового абонемента {subscription_id}: {e}")
-            return False
-
-    def create_razoviy_replacement_lesson(self, subscription_id, child_name, selected_date, original_lesson_data):
-        """Создает замещающее занятие для разового абонемента на выбранную дату."""
-        try:
-            from datetime import datetime
-            
-            # Парсим выбранную дату
-            if isinstance(selected_date, str):
-                lesson_date = datetime.strptime(selected_date, '%d.%m.%Y')
-            else:
-                lesson_date = selected_date
-            
-            # Получаем информацию об абонементе для определения кружка
-            subscription_info = self.get_subscription_details(subscription_id)
-            circle_name = subscription_info.get('circle_name', '') if subscription_info else ''
-            
-            # Используем время из оригинального занятия
-            start_time = original_lesson_data.get('start_time', '10:00')
-            end_time = original_lesson_data.get('end_time', '10:30')
-            
-            # Создаем новое занятие
-            return self._add_lesson_to_calendar(
-                subscription_id,
-                child_name,
-                lesson_date,
-                start_time,
-                end_time
-            )
-            
-        except Exception as e:
-            logging.error(f"❌ Ошибка при создании замещающего занятия для разового абонемента: {e}")
+            logging.error(f"Ошибка при обновлении отметки занятия {lesson_id}: {e}")
             return False
 
     def get_subscription_details(self, subscription_id):
@@ -2722,8 +2032,7 @@ class GoogleSheetsService:
                         'attended_classes': sub.get('Прошло занятий', ''),
                         'remaining_classes': sub.get('Осталось занятий', ''),
                         'missed_classes': sub.get('Пропущено', ''),
-                        'cost': sub.get('Стоимость', ''),
-                        'subscription_type': sub.get('Тип абонемента', '')
+                        'cost': sub.get('Стоимость', '')
                     }
             return None
         except Exception as e:
@@ -2880,7 +2189,6 @@ class GoogleSheetsService:
         """Обновляет статистику абонемента на основе данных из календаря."""
         try:
             # Получаем данные из календаря занятий
-            cal_sheet = self.spreadsheet.worksheet("Календарь занятий")
             all_cal_values = cal_sheet.get_all_values()
             
             if not all_cal_values:
@@ -4289,13 +3597,7 @@ class GoogleSheetsService:
             
             # Получаем данные из листа "Календарь занятий"
             calendar_sheet = self.spreadsheet.worksheet("Календарь занятий")
-            try:
-                calendar_data = calendar_sheet.get_all_values()
-            except Exception as e:
-                if "429" in str(e) or "Quota exceeded" in str(e):
-                    logging.warning("⚠️ Превышена квота Google Sheets API. Пропускаю синхронизацию календаря.")
-                    return "⚠️ Синхронизация пропущена из-за превышения квоты API"
-                raise e
+            calendar_data = calendar_sheet.get_all_values()
             
             if len(calendar_data) <= 1:
                 return "❌ Лист 'Календарь занятий' пуст или содержит только заголовки."
@@ -4372,9 +3674,6 @@ class GoogleSheetsService:
                     # Пропускаем строки без ID занятия
                     if not lesson_data['lesson_id']:
                         continue
-                    
-                    # Разовые абонементы теперь тоже синхронизируются с Google Calendar
-                    # (убрали проверку, чтобы события создавались для всех типов абонементов)
                     
                     # Получаем название кружка
                     circle_name = circle_names_map.get(lesson_data['subscription_id'], 'Неизвестный кружок')
@@ -5673,22 +4972,15 @@ class GoogleSheetsService:
                     
                     fixed_data.append(fixed_row)
             
-            # ИСПРАВЛЕНО: Обновляем только дублированные ID, НЕ пересоздавая всю таблицу
-            logging.info("🔒 ЗАЩИТА ID: Обновляем только дублированные ID точечно")
+            # Перезаписываем только данные (сохраняя заголовки в 1-й строке)
+            # Очищаем данные начиная со 2-й строки
+            all_data = cal_sheet.get_all_values()
+            if len(all_data) > 1:
+                cal_sheet.delete_rows(2, len(all_data))
             
-            # Обновляем только те строки, где ID был изменен
-            updates_made = 0
-            for i, (original_row, fixed_row) in enumerate(zip(rows, fixed_data)):
-                if original_row[0] != fixed_row[0]:  # ID изменился
-                    row_number = i + 2  # +2 потому что строки начинаются с 1, и есть заголовок
-                    try:
-                        cal_sheet.update_cell(row_number, 1, fixed_row[0])  # Обновляем только столбец A (ID)
-                        updates_made += 1
-                        logging.info(f"🔧 Обновлен ID в строке {row_number}: {original_row[0]} → {fixed_row[0]}")
-                    except Exception as e:
-                        logging.error(f"❌ Ошибка обновления строки {row_number}: {e}")
-            
-            logging.info(f"✅ Точечно обновлено {updates_made} ID (вместо пересоздания всей таблицы)")
+            # Добавляем исправленные данные (без заголовков)
+            if fixed_data:
+                cal_sheet.append_rows(fixed_data, value_input_option='RAW')
             
             logging.info(f"✅ Исправлено {len(duplicates)} типов дублированных ID")
             logging.info(f"📊 Всего занятий: {len(rows)}, уникальных ID: {len(used_ids)}")
@@ -6795,7 +6087,6 @@ class GoogleSheetsService:
 
 # Глобальный экземпляр сервиса
 try:
-    # ИСПРАВЛЕНО: Возвращаем простую рабочую инициализацию
     sheets_service = GoogleSheetsService(config.GOOGLE_CREDENTIALS_PATH, config.GOOGLE_SHEET_NAME)
 except Exception as e:
     sheets_service = None

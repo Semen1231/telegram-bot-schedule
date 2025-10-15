@@ -1,0 +1,11 @@
+[build]
+  command = "echo 'This is a Python Telegram Bot, not a web app'"
+  publish = "static"
+
+[build.environment]
+  PYTHON_VERSION = "3.10"
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

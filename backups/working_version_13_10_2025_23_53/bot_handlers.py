@@ -54,7 +54,6 @@ async def delete_message_after_delay(bot, chat_id, message_id, delay_seconds):
     SELECT_CALENDAR_DATE,
     SELECT_LESSON_FROM_DATE,
     SELECT_ATTENDANCE_MARK,
-    SELECT_TRANSFER_DATE,
 
     # Settings States
     SETTINGS_MENU,
@@ -71,7 +70,7 @@ async def delete_message_after_delay(bot, chat_id, message_id, delay_seconds):
     
     # Notification Settings States
     NOTIFICATION_TIME_SETTINGS,
-) = range(37)
+) = range(36)
 # === Вспомогательные функции ===
 def create_calendar_keyboard(year, month):
     keyboard = []
@@ -672,13 +671,13 @@ async def update_data_in_background():
         logging.info(f"✅ Обновлено абонементов: {calendar_count}")
         
         # 2. Обновляем прогноз бюджета
-        await asyncio.sleep(5)  # Увеличенная задержка для снижения нагрузки на API
+        await asyncio.sleep(2)  # Задержка для снижения нагрузки на API
         logging.info("💰 Обновляю прогноз бюджета...")
         forecast_count, forecast_errors = sheets_service.update_full_forecast()
         logging.info(f"✅ Создано прогнозов: {forecast_count}")
         
         # 3. Синхронизируем с Google Calendar (фоновая синхронизация)
-        await asyncio.sleep(10)  # Увеличенная задержка для снижения нагрузки на API
+        await asyncio.sleep(3)  # Задержка для снижения нагрузки на API
         logging.info("🔄 Синхронизирую с Google Calendar...")
         try:
             calendar_result = sheets_service.sync_calendar_with_google_calendar()
@@ -687,7 +686,7 @@ async def update_data_in_background():
             logging.error(f"❌ Ошибка при синхронизации календаря: {e}")
         
         # 4. Синхронизируем прогноз с Google Calendar (фоновая синхронизация)
-        await asyncio.sleep(10)  # Увеличенная задержка для снижения нагрузки на API
+        await asyncio.sleep(2)  # Задержка для снижения нагрузки на API
         logging.info("💰 Синхронизирую прогноз с Google Calendar...")
         try:
             forecast_result = sheets_service.sync_forecast_with_google_calendar()
@@ -696,7 +695,7 @@ async def update_data_in_background():
             logging.error(f"❌ Ошибка при синхронизации прогноза: {e}")
         
         # 5. Очищаем дубли в Google Calendar (фоновая очистка)
-        await asyncio.sleep(15)  # Увеличенная задержка для снижения нагрузки на API
+        await asyncio.sleep(2)  # Задержка для снижения нагрузки на API
         logging.info("🧹 Очищаю дубли в Google Calendar...")
         try:
             clean_result = sheets_service.clean_duplicate_events()
@@ -1286,31 +1285,11 @@ async def renewal_create_handler(update: Update, context: ContextTypes.DEFAULT_T
                 [InlineKeyboardButton("🏠 Главное меню", callback_data="main_menu")]
             ]
         else:
-            # Улучшенная обработка ошибок с конкретными рекомендациями
-            if "Сетевая ошибка" in result or "httpx.ReadError" in result:
-                success_message = f"🌐 <b>Проблема с подключением</b>\n\n{result}"
-                keyboard = [
-                    [InlineKeyboardButton("🔄 Попробовать снова", callback_data="renewal_confirm_create")],
-                    [InlineKeyboardButton("⏰ Подождать минуту", callback_data="menu_forecast")]
-                ]
-            elif "Превышена квота" in result or "429" in result:
-                success_message = f"📊 <b>Временное ограничение API</b>\n\n{result}"
-                keyboard = [
-                    [InlineKeyboardButton("⏰ Подождать и повторить", callback_data="renewal_confirm_create")],
-                    [InlineKeyboardButton("⏪ Назад к прогнозу", callback_data="menu_forecast")]
-                ]
-            elif "Превышено время ожидания" in result or "timeout" in result.lower():
-                success_message = f"⏰ <b>Превышено время ожидания</b>\n\n{result}"
-                keyboard = [
-                    [InlineKeyboardButton("🔄 Повторить попытку", callback_data="renewal_confirm_create")],
-                    [InlineKeyboardButton("⏪ Назад к прогнозу", callback_data="menu_forecast")]
-                ]
-            else:
-                success_message = f"❌ <b>Ошибка при создании абонемента:</b>\n\n{result}"
-                keyboard = [
-                    [InlineKeyboardButton("🔄 Попробовать снова", callback_data="renewal_confirm_create")],
-                    [InlineKeyboardButton("⏪ Назад к прогнозу", callback_data="menu_forecast")]
-                ]
+            success_message = f"❌ <b>Ошибка при создании абонемента:</b>\n\n{result}"
+            keyboard = [
+                [InlineKeyboardButton("🔄 Попробовать снова", callback_data="renewal_confirm_create")],
+                [InlineKeyboardButton("⏪ Назад к прогнозу", callback_data="menu_forecast")]
+            ]
         
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(success_message, reply_markup=reply_markup, parse_mode='HTML')
@@ -1545,14 +1524,7 @@ def generate_calendar_keyboard(year, month, lessons_by_date):
 async def calendar_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Показывает интерактивный календарь занятий."""
     query = update.callback_query
-    try:
-        await query.answer()
-    except Exception as e:
-        if "too old" in str(e) or "timeout expired" in str(e):
-            logging.warning(f"⚠️ Callback query устарел: {e}")
-            # Продолжаем выполнение без ответа на query
-        else:
-            raise e
+    await query.answer()
     
     try:
         from datetime import datetime
@@ -1922,166 +1894,6 @@ async def select_lesson_from_date(update: Update, context: ContextTypes.DEFAULT_
         await query.edit_message_text(f"❌ Ошибка при загрузке статусов: {e}", reply_markup=reply_markup)
         return INTERACTIVE_CALENDAR
 
-async def show_date_selection_calendar(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Показывает календарь для выбора даты переноса разового абонемента."""
-    from datetime import datetime, timedelta
-    
-    query = update.callback_query
-    
-    # Получаем текущий месяц или из callback_data
-    current_date = datetime.now()
-    if query.data.startswith('date_cal_'):
-        try:
-            month_year = query.data.replace('date_cal_', '')
-            current_date = datetime.strptime(month_year, '%m_%Y')
-        except:
-            pass
-    
-    # Получаем данные о переносе
-    transfer_data = context.user_data.get('razoviy_transfer', {})
-    subscription_id = transfer_data.get('subscription_id', '')
-    child_name = transfer_data.get('child_name', '')
-    
-    # Русские названия месяцев
-    ru_months = {
-        1: 'Январь', 2: 'Февраль', 3: 'Март', 4: 'Апрель',
-        5: 'Май', 6: 'Июнь', 7: 'Июль', 8: 'Август',
-        9: 'Сентябрь', 10: 'Октябрь', 11: 'Ноябрь', 12: 'Декабрь'
-    }
-    
-    message_text = f"📅 <b>Выберите дату для переноса занятия</b>\n\n"
-    message_text += f"👶 <b>Ребенок:</b> {child_name}\n"
-    message_text += f"🆔 <b>Абонемент:</b> {subscription_id}\n\n"
-    message_text += f"📆 <b>{ru_months[current_date.month]} {current_date.year}</b>"
-    
-    # Создаем календарь
-    keyboard = []
-    
-    # Кнопки навигации по месяцам
-    prev_month = current_date.replace(day=1) - timedelta(days=1)
-    next_month = (current_date.replace(day=28) + timedelta(days=4)).replace(day=1)
-    
-    nav_row = [
-        InlineKeyboardButton("◀️", callback_data=f"date_cal_{prev_month.strftime('%m_%Y')}"),
-        InlineKeyboardButton(f"{ru_months[current_date.month]} {current_date.year}", callback_data="ignore"),
-        InlineKeyboardButton("▶️", callback_data=f"date_cal_{next_month.strftime('%m_%Y')}")
-    ]
-    keyboard.append(nav_row)
-    
-    # Заголовки дней недели
-    days_header = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
-    keyboard.append([InlineKeyboardButton(day, callback_data="ignore") for day in days_header])
-    
-    # Дни месяца
-    import calendar
-    cal = calendar.monthcalendar(current_date.year, current_date.month)
-    
-    for week in cal:
-        week_buttons = []
-        for day in week:
-            if day == 0:
-                week_buttons.append(InlineKeyboardButton(" ", callback_data="ignore"))
-            else:
-                date_str = f"{day:02d}.{current_date.month:02d}.{current_date.year}"
-                week_buttons.append(InlineKeyboardButton(
-                    str(day), 
-                    callback_data=f"select_date_{date_str}"
-                ))
-        keyboard.append(week_buttons)
-    
-    # Кнопка отмены
-    keyboard.append([InlineKeyboardButton("❌ Отмена", callback_data="cancel_date_selection")])
-    
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    try:
-        await query.edit_message_text(message_text, reply_markup=reply_markup, parse_mode='HTML')
-    except Exception as e:
-        logging.error(f"❌ Ошибка при показе календаря: {e}")
-        await query.message.reply_text(message_text, reply_markup=reply_markup, parse_mode='HTML')
-    
-    return SELECT_TRANSFER_DATE
-
-async def handle_date_selection(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Обрабатывает выбор даты для переноса разового абонемента."""
-    query = update.callback_query
-    await query.answer()
-    
-    if query.data.startswith('select_date_'):
-        selected_date = query.data.replace('select_date_', '')
-        
-        # Получаем данные о переносе
-        transfer_data = context.user_data.get('razoviy_transfer', {})
-        
-        if not transfer_data:
-            await query.edit_message_text("❌ Ошибка: данные переноса не найдены")
-            return MAIN_MENU
-        
-        # Создаем замещающее занятие
-        success = sheets_service.create_razoviy_replacement_lesson(
-            transfer_data['subscription_id'],
-            transfer_data['child_name'],
-            selected_date,
-            transfer_data['lesson_data']
-        )
-        
-        if success:
-            message_text = f"✅ <b>Занятие успешно перенесено!</b>\n\n"
-            message_text += f"👶 <b>Ребенок:</b> {transfer_data['child_name']}\n"
-            message_text += f"📅 <b>Новая дата:</b> {selected_date}\n"
-            message_text += f"🆔 <b>Абонемент:</b> {transfer_data['subscription_id']}\n\n"
-            message_text += f"🔄 Синхронизация с Google Calendar запущена в фоне."
-            
-            # Запускаем синхронизацию с Google Calendar в фоне
-            import asyncio
-            asyncio.create_task(sync_razoviy_lesson_with_calendar(transfer_data['subscription_id']))
-        else:
-            message_text = f"❌ <b>Ошибка при создании занятия</b>\n\n"
-            message_text += f"Не удалось создать занятие на {selected_date}.\n"
-            message_text += f"Попробуйте выбрать другую дату."
-        
-        keyboard = [
-            [InlineKeyboardButton("📅 Календарь занятий", callback_data="menu_calendar")],
-            [InlineKeyboardButton("🏠 Главное меню", callback_data="main_menu")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await query.edit_message_text(message_text, reply_markup=reply_markup, parse_mode='HTML')
-        
-        # Очищаем данные переноса
-        context.user_data.pop('razoviy_transfer', None)
-        
-        return MAIN_MENU
-    
-    elif query.data == 'cancel_date_selection':
-        await query.edit_message_text(
-            "❌ Перенос занятия отменен",
-            reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton("📅 Календарь занятий", callback_data="menu_calendar")
-            ]])
-        )
-        context.user_data.pop('razoviy_transfer', None)
-        return MAIN_MENU
-    
-    elif query.data.startswith('date_cal_'):
-        # Навигация по месяцам
-        return await show_date_selection_calendar(update, context)
-    
-    return SELECT_TRANSFER_DATE
-
-async def sync_razoviy_lesson_with_calendar(subscription_id):
-    """Синхронизирует новое занятие разового абонемента с Google Calendar."""
-    try:
-        import asyncio
-        await asyncio.sleep(2)  # Небольшая задержка для завершения создания занятия
-        
-        logging.info(f"🔄 Запуск синхронизации Google Calendar для разового абонемента {subscription_id}")
-        result = sheets_service.sync_calendar_with_google_calendar()
-        logging.info(f"✅ Синхронизация завершена: {result[:100]}...")
-        
-    except Exception as e:
-        logging.error(f"❌ Ошибка при синхронизации разового занятия: {e}")
-
 async def save_attendance_mark(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Сохраняет отметку посещения и запускает обновления."""
     query = update.callback_query
@@ -2153,38 +1965,16 @@ async def save_attendance_mark(update: Update, context: ContextTypes.DEFAULT_TYP
         
         # 1. Сохраняем отметку в Google Sheets
         logging.info(f"📝 Сохранение отметки '{attendance_mark}' для занятия {lesson_id}")
-        result = sheets_service.update_lesson_mark(lesson_id, attendance_mark)
-        
-        # Проверяем, нужен ли выбор даты для разового абонемента
-        if isinstance(result, dict) and result.get('status') == 'needs_date_selection':
-            logging.info(f"🎯 Разовый абонемент требует выбора даты для переноса")
-            
-            # Сохраняем данные для выбора даты
-            context.user_data['razoviy_transfer'] = {
-                'subscription_id': result['subscription_id'],
-                'child_name': result['child_name'],
-                'lesson_data': result['lesson_data'],
-                'original_query': query
-            }
-            
-            # Показываем календарь для выбора даты
-            return await show_date_selection_calendar(update, context)
-        
-        success = result if isinstance(result, bool) else True
+        success = sheets_service.update_lesson_mark(lesson_id, attendance_mark)
         
         if not success:
             error_message = f"❌ <b>Ошибка при сохранении отметки</b>\n\n"
-            error_message += f"Не удалось сохранить отметку '{attendance_mark}' для занятия {lesson_id}.\n\n"
-            error_message += "🔄 <b>Возможные причины:</b>\n"
-            error_message += "• Временные проблемы с интернетом\n"
-            error_message += "• Перегрузка Google Sheets API\n"
-            error_message += "• Превышение лимитов запросов\n\n"
-            error_message += "⏰ <b>Рекомендация:</b> Подождите 30-60 секунд и попробуйте снова."
+            error_message += f"Не удалось сохранить отметку '{attendance_mark}' для занятия {lesson_id}.\n"
+            error_message += "Попробуйте еще раз или обратитесь к администратору."
             
             keyboard = [
-                [InlineKeyboardButton("🔄 Попробовать снова", callback_data=f"lesson_mark_{lesson_id}")],
-                [InlineKeyboardButton("📅 Календарь занятий", callback_data="menu_calendar")],
-                [InlineKeyboardButton("🏠 Главное меню", callback_data="main_menu")]
+                [InlineKeyboardButton("🏠 Главное меню", callback_data="main_menu")],
+                [InlineKeyboardButton("📅 Календарь занятий", callback_data="menu_calendar")]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
             await query.edit_message_text(error_message, reply_markup=reply_markup, parse_mode='HTML')
@@ -3353,63 +3143,44 @@ async def confirm_delete_subscription_handler(update: Update, context: ContextTy
             final_message += "\n🔄 Фоновые обновления запущены"
             final_message += "\n✅ Все данные синхронизированы"
             
-            # Показываем итоговое сообщение с кнопкой возврата
-            keyboard = [[InlineKeyboardButton("📄 Вернуться к списку абонементов", callback_data="menu_subscriptions")]]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            
+            # Показываем итоговое сообщение
             try:
-                await query.edit_message_text(final_message, reply_markup=reply_markup)
-                deletion_success = True
-            except Exception as edit_error:
-                # Если не можем редактировать (возможно, таймаут), отправляем новое сообщение
-                logging.warning(f"⚠️ Не удалось отредактировать сообщение: {edit_error}")
-                try:
-                    await context.bot.send_message(
-                        chat_id=update.effective_chat.id,
-                        text=final_message,
-                        reply_markup=reply_markup
-                    )
-                    deletion_success = True
-                except Exception as send_error:
-                    logging.error(f"❌ Ошибка отправки итогового сообщения: {send_error}")
-                    deletion_success = False
+                await query.edit_message_text(final_message)
+            except Exception:
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text=final_message
+                )
             
-            # Callback уже был обработан в начале функции
-            logging.info(f"✅ Удаление абонемента {sub_id} завершено успешно")
+            # Показываем alert с кратким результатом (если callback еще активен)
+            try:
+                alert_message = f"✅ Абонемент {sub_id} удален!\n"
+                alert_message += f"📊 Sheets: {sum(deletion_result['deleted_counts'].values())} записей\n"
+                alert_message += f"📅 Calendar: {calendar_result['deleted_count']} событий"
+                await query.answer(alert_message, show_alert=True)
+            except Exception:
+                # Если callback истек, просто пропускаем alert
+                pass
             
-            # Очищаем контекст
+            # Очищаем контекст и возвращаемся к меню
             context.user_data.clear()
             
-            # Если удаление прошло успешно, не нужно автоматически возвращаться в меню
-            # Пользователь сам нажмет кнопку "Вернуться к списку"
-            if deletion_success:
-                return MAIN_MENU  # Остаемся в текущем состоянии, ждем нажатия кнопки
-            else:
-                # Если были проблемы с отправкой сообщения, принудительно возвращаемся в меню
-                await asyncio.sleep(1)
-                return await subscriptions_menu(update, context)
+            # Небольшая задержка перед возвратом в меню
+            await asyncio.sleep(2)
+            return await subscriptions_menu(update, context)
             
         except Exception as e:
-            error_msg = str(e)
             logging.error(f"❌ Критическая ошибка при удалении абонемента {sub_id}: {e}")
-            
-            # Показываем ошибку пользователю с кнопкой возврата
-            keyboard = [[InlineKeyboardButton("📄 Вернуться к списку абонементов", callback_data="menu_subscriptions")]]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            
             try:
-                await query.edit_message_text(
-                    f"❌ Произошла критическая ошибка при удалении:\n{error_msg}",
-                    reply_markup=reply_markup
-                )
+                await query.edit_message_text(f"❌ Произошла критическая ошибка при удалении:\n{str(e)}")
+                await query.answer("❌ Ошибка удаления", show_alert=True)
             except Exception:
                 # Если callback истек, отправляем новое сообщение
                 await context.bot.send_message(
                     chat_id=update.effective_chat.id,
-                    text=f"❌ Произошла критическая ошибка при удалении:\n{error_msg}",
-                    reply_markup=reply_markup
+                    text=f"❌ Произошла критическая ошибка при удалении:\n{str(e)}"
                 )
-            return MAIN_MENU
+            return await subscriptions_menu(update, context)
 
 # === Логика создания абонемента ===
 async def create_sub_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -4466,132 +4237,25 @@ async def create_sub_finish_handler(update: Update, context: ContextTypes.DEFAUL
             return CREATE_SUB_SCHEDULE_DAY
         
         # Создаем абонемент через сервис
-        try:
-            logging.info(f"🔄 Начинаю создание абонемента для {sub_data['child_name']} - {sub_data['circle_name']}")
-            result_message = sheets_service.create_full_subscription(sub_data)
-            logging.info(f"📋 Результат создания абонемента: {result_message[:100]}...")
-            
-            # Проверяем, что абонемент действительно создан (даже если была ошибка в конце)
-            if "✅" in result_message or "успешно" in result_message.lower():
-                # Абонемент создан успешно
-                success = True
-                logging.info("✅ Абонемент создан успешно")
-            elif "❌" in result_message or "ошибка" in result_message.lower():
-                # Явная ошибка создания
-                success = False
-                logging.warning("❌ Явная ошибка при создании абонемента")
-            else:
-                # Неопределенный результат - проверяем наличие абонемента
-                success = True  # Предполагаем успех, если нет явной ошибки
-                logging.info("ℹ️ Неопределенный результат - предполагаем успех")
-                
-        except Exception as creation_error:
-            # Ошибка при создании - но возможно абонемент все же создался
-            logging.error(f"Ошибка при создании абонемента: {creation_error}")
-            
-            # Проверяем, создался ли абонемент несмотря на ошибку
-            try:
-                # Генерируем ID абонемента для проверки (используем ту же логику, что и в create_full_subscription)
-                ru_months = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек']
-                start_date = sub_data['start_date']
-                date_part = f"{start_date.day}{ru_months[start_date.month - 1]}"
-                clean_child_name = ''.join(filter(str.isalnum, sub_data['child_name']))
-                clean_circle_name = ''.join(filter(str.isalnum, sub_data['circle_name']))
-                
-                # Получаем текущее количество строк для определения ID
-                subs_sheet = sheets_service.spreadsheet.worksheet("Абонементы")
-                next_row_num = len(subs_sheet.get_all_values()) + 1
-                subscription_id = f"{date_part}.{clean_child_name}{clean_circle_name}-{next_row_num}"
-                
-                # Проверяем, существует ли абонемент
-                subscription_details = sheets_service.get_subscription_details(subscription_id)
-                
-                if subscription_details:
-                    # Абонемент создался, несмотря на ошибку в конце
-                    success = True
-                    result_message = f"✅ Абонемент `{subscription_id}` успешно создан!\n\n⚠️ Произошла сетевая ошибка в конце процесса, но все данные сохранены корректно."
-                else:
-                    # Абонемент действительно не создался
-                    success = False
-                    if "httpx.ReadError" in str(creation_error):
-                        result_message = f"🌐 Сетевая ошибка при создании абонемента.\n\n🔄 Попробуйте создать абонемент еще раз через 30-60 секунд.\n\n📡 Возможные причины:\n• Временные проблемы с интернетом\n• Перегрузка Google Sheets API\n• Таймаут соединения"
-                    else:
-                        result_message = f"❌ Произошла ошибка при создании абонемента: {creation_error}"
-                        
-            except Exception as check_error:
-                # Не удалось проверить - показываем исходную ошибку
-                success = False
-                result_message = f"❌ Произошла ошибка при создании абонемента: {creation_error}"
+        result_message = sheets_service.create_full_subscription(sub_data)
         
-        if success:
-            # Запускаем фоновые обновления асинхронно
-            asyncio.create_task(update_after_subscription_creation())
-            
-            # Очищаем данные пользователя
-            context.user_data.clear()
-            
-            # Показываем результат с информацией о фоновых обновлениях
-            result_message += "\n\n🔄 Обновление статистики и календарей запущено в фоне."
-            keyboard = [
-                [InlineKeyboardButton("🏠 Главное меню", callback_data="main_menu")],
-                [InlineKeyboardButton("📅 Календарь занятий", callback_data="menu_calendar")],
-                [InlineKeyboardButton("📄 Список абонементов", callback_data="menu_subscriptions")]
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            
-            # Отправляем сообщение с обработкой сетевых ошибок
-            try:
-                logging.info("📤 Отправляю результат пользователю...")
-                await query.edit_message_text(result_message, reply_markup=reply_markup)
-                logging.info("✅ Результат успешно отправлен пользователю")
-                return MAIN_MENU
-            except Exception as send_error:
-                logging.error(f"❌ Ошибка при отправке результата пользователю: {send_error}")
-                # Пробуем отправить новое сообщение вместо редактирования
-                try:
-                    await context.bot.send_message(
-                        chat_id=update.effective_chat.id,
-                        text=result_message,
-                        reply_markup=reply_markup
-                    )
-                    logging.info("✅ Результат отправлен как новое сообщение")
-                    return MAIN_MENU
-                except Exception as new_send_error:
-                    logging.error(f"❌ Критическая ошибка отправки: {new_send_error}")
-                    # Если и это не работает, показываем сообщение об успехе через исключение
-                    error_msg = str(send_error)
-                    if "Query is too old" in error_msg or "query id is invalid" in error_msg or "httpx.ReadError" in error_msg:
-                        logging.warning("⚠️ Сетевая ошибка при отправке результата, но абонемент создан")
-                        # Не пробрасываем ошибку - просто возвращаемся в меню
-                        return MAIN_MENU
-                    else:
-                        # Другая критическая ошибка
-                        raise send_error
-        else:
-            # Показываем ошибку с возможностью повтора
-            keyboard = [
-                [InlineKeyboardButton("🔄 Попробовать снова", callback_data="create_sub_finish")],
-                [InlineKeyboardButton("⏪ Назад к сводке", callback_data="show_schedule_summary")]
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            
-            try:
-                await query.edit_message_text(result_message, reply_markup=reply_markup)
-                return CREATE_SUB_SCHEDULE_DAY
-            except Exception as error_send_error:
-                logging.error(f"❌ Ошибка при отправке сообщения об ошибке: {error_send_error}")
-                # Пробуем отправить новое сообщение
-                try:
-                    await context.bot.send_message(
-                        chat_id=update.effective_chat.id,
-                        text=result_message,
-                        reply_markup=reply_markup
-                    )
-                    return CREATE_SUB_SCHEDULE_DAY
-                except Exception:
-                    # Если и это не работает, просто возвращаемся в предыдущее состояние
-                    logging.error("❌ Не удалось отправить сообщение об ошибке создания")
-                    return CREATE_SUB_SCHEDULE_DAY
+        # Запускаем фоновые обновления асинхронно
+        asyncio.create_task(update_after_subscription_creation())
+        
+        # Очищаем данные пользователя
+        context.user_data.clear()
+        
+        # Показываем результат с информацией о фоновых обновлениях
+        result_message += "\n\n🔄 Обновление статистики и календарей запущено в фоне."
+        keyboard = [
+            [InlineKeyboardButton("🏠 Главное меню", callback_data="main_menu")],
+            [InlineKeyboardButton("📅 Календарь занятий", callback_data="menu_calendar")],
+            [InlineKeyboardButton("📄 Список абонементов", callback_data="menu_subscriptions")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(result_message, reply_markup=reply_markup)
+        return MAIN_MENU
         
     except Exception as e:
         error_message = f"❌ Произошла ошибка при создании абонемента: {e}"
@@ -4601,19 +4265,7 @@ async def create_sub_finish_handler(update: Update, context: ContextTypes.DEFAUL
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-        try:
-            await query.edit_message_text(error_message, reply_markup=reply_markup)
-        except Exception as final_error:
-            # Если и это не работает, отправляем новое сообщение
-            logging.error(f"❌ Финальная ошибка отправки: {final_error}")
-            try:
-                await context.bot.send_message(
-                    chat_id=update.effective_chat.id,
-                    text=error_message,
-                    reply_markup=reply_markup
-                )
-            except Exception:
-                logging.error("❌ Критическая ошибка: не удалось отправить ни одного сообщения")
+        await query.edit_message_text(error_message, reply_markup=reply_markup)
         return CREATE_SUB_SCHEDULE_DAY
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -4837,10 +4489,6 @@ def create_conversation_handler() -> ConversationHandler:
                 CallbackQueryHandler(save_attendance_mark, pattern='^attendance_mark_'),
                 CallbackQueryHandler(cancel_notification_handler, pattern='^cancel_notification_'),  # Для отмены уведомлений
                 CallbackQueryHandler(select_calendar_date, pattern='^calendar_date_'),
-                CallbackQueryHandler(calendar_menu, pattern='^menu_calendar$')
-            ],
-            SELECT_TRANSFER_DATE: [
-                CallbackQueryHandler(handle_date_selection, pattern='^(select_date_|cancel_date_selection|date_cal_)'),
                 CallbackQueryHandler(calendar_menu, pattern='^menu_calendar$')
             ],
             
