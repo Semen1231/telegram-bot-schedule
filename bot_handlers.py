@@ -55,6 +55,7 @@ async def delete_message_after_delay(bot, chat_id, message_id, delay_seconds):
     SELECT_LESSON_FROM_DATE,
     SELECT_ATTENDANCE_MARK,
     SELECT_TRANSFER_DATE,
+    SELECT_TRANSFER_CHOICE,
 
     # Settings States
     SETTINGS_MENU,
@@ -71,7 +72,7 @@ async def delete_message_after_delay(bot, chat_id, message_id, delay_seconds):
     
     # Notification Settings States
     NOTIFICATION_TIME_SETTINGS,
-) = range(37)
+) = range(38)
 # === Вспомогательные функции ===
 def create_calendar_keyboard(year, month):
     keyboard = []
@@ -720,24 +721,32 @@ async def update_stats_menu_handler(update: Update, context: ContextTypes.DEFAUL
     await query.edit_message_text("🔄 Обновляю статистику и прогноз...")
     
     try:
-        # Обновляем календари занятий для всех абонементов
-        calendar_count, calendar_errors = sheets_service.update_all_calendars()
+        # ИСПРАВЛЕНО: НЕ обновляем календари занятий (это удаляет данные!)
+        # calendar_count, calendar_errors = sheets_service.update_all_calendars()
         
-        # Обновляем полный прогноз
+        # Обновляем только прогноз бюджета
         forecast_count, skipped_forecasts = sheets_service.update_full_forecast()
         
-        # Формируем сообщение с результатами
-        message_text = "✅ <b>Статистика обновлена!</b>\n\n"
-        message_text += f"📅 Обновлено календарей: <b>{calendar_count}</b>\n"
-        message_text += f"📊 Создано записей прогноза: <b>{forecast_count}</b>\n"
+        # Синхронизируем прогноз с Google Calendar
+        await asyncio.sleep(2)  # Задержка для снижения нагрузки на API
+        try:
+            forecast_result = sheets_service.sync_forecast_with_google_calendar()
+            logging.info(f"✅ Синхронизация прогноза с Google Calendar: {forecast_result[:100]}...")
+        except Exception as e:
+            logging.error(f"❌ Ошибка при синхронизации прогноза с Google Calendar: {e}")
         
-        # Показываем ошибки календарей
-        if calendar_errors:
-            message_text += f"\n⚠️ <b>Ошибки календарей:</b> {len(calendar_errors)}\n"
-            for i, error in enumerate(calendar_errors[:2]):
-                message_text += f"• {error}\n"
-            if len(calendar_errors) > 2:
-                message_text += f"• ... и еще {len(calendar_errors) - 2}\n"
+        # Формируем сообщение с результатами
+        message_text = "✅ <b>Прогноз бюджета обновлен!</b>\n\n"
+        message_text += f"📊 Создано записей прогноза: <b>{forecast_count}</b>\n"
+        message_text += f"🔄 Синхронизировано с Google Calendar\n"
+        
+        # Показываем ошибки прогноза (календари не обновляем)
+        # if calendar_errors:
+        #     message_text += f"\n⚠️ <b>Ошибки календарей:</b> {len(calendar_errors)}\n"
+        #     for i, error in enumerate(calendar_errors[:2]):
+        #         message_text += f"• {error}\n"
+        #     if len(calendar_errors) > 2:
+        #         message_text += f"• ... и еще {len(calendar_errors) - 2}\n"
         
         # Показываем ошибки прогноза
         if skipped_forecasts:
@@ -860,28 +869,138 @@ async def fix_duplicate_ids_handler(update: Update, context: ContextTypes.DEFAUL
     return MAIN_MENU
     
 async def forecast_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Показывает запланированные оплаты с кнопками для управления."""
+    """Показывает прогноз бюджета по месяцам и неделям."""
     query = update.callback_query
     await query.answer()
-    await query.edit_message_text("🔄 Загружаю запланированные оплаты...")
+    await query.edit_message_text("🔄 Загружаю прогноз бюджета...")
 
     logging.info("🔍 Запуск forecast_menu_handler")
-    planned_payments = sheets_service.get_planned_payments()
-    logging.info(f"📊 Получено запланированных оплат: {len(planned_payments)}")
     
-    if not planned_payments:
-        message_text = "📊 <b>Запланированные оплаты</b>\n\n"
-        message_text += "Нет запланированных оплат со статусом 'Оплата запланирована'."
+    # Получаем данные по неделям
+    try:
+        weeks_data = sheets_service.get_budget_forecast_by_weeks()
+    except Exception as e:
+        logging.error(f"❌ Ошибка при получении прогноза: {e}")
+        message_text = "❌ <b>Ошибка загрузки прогноза</b>\n\n"
+        message_text += f"Не удалось загрузить данные прогноза: {str(e)[:100]}..."
+        keyboard = [[InlineKeyboardButton("⏪ Назад в главное меню", callback_data="main_menu")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(message_text, reply_markup=reply_markup, parse_mode='HTML')
+        return MAIN_MENU
+    
+    if not weeks_data:
+        message_text = "📊 <b>Прогноз бюджета</b>\n\n"
+        message_text += "Нет данных для отображения прогноза."
         keyboard = [[InlineKeyboardButton("⏪ Назад в главное меню", callback_data="main_menu")]]
     else:
-        # Группируем оплаты по абонементам (ребенок + кружок)
+        message_text = "📊 <b>Прогноз бюджета</b>\n\n"
+        
+        total_planned_all = 0
+        total_paid_all = 0
+        
+        # Обрабатываем каждый месяц
+        for month_key in sorted(weeks_data.keys()):
+            month_data = weeks_data[month_key]
+            
+            total_planned_all += month_data['total_planned']
+            total_paid_all += month_data['total_paid']
+            
+            message_text += f"📅 <b>{month_data['name']}</b>\n"
+            message_text += f"💰 Запланировано: <b>{month_data['total_planned']:.0f} руб.</b>\n"
+            message_text += f"✅ Оплачено: <b>{month_data['total_paid']:.0f} руб.</b>\n\n"
+            
+            # Показываем недели с данными
+            weeks_with_data = []
+            for week_key in sorted(month_data['weeks'].keys()):
+                week_data = month_data['weeks'][week_key]
+                if week_data['planned'] > 0 or week_data['paid'] > 0:
+                    weeks_with_data.append(week_data)
+            
+            if weeks_with_data:
+                for week_data in weeks_with_data:
+                    message_text += f"  📍 Неделя {week_data['start_date']}-{week_data['end_date']}:\n"
+                    message_text += f"    💰 Запланировано: {week_data['planned']:.0f} руб.\n"
+                    message_text += f"    ✅ Оплачено: {week_data['paid']:.0f} руб.\n"
+                message_text += "\n"
+            else:
+                message_text += "  📭 Нет запланированных оплат\n\n"
+        
+        # Общая сводка
+        message_text += "📈 <b>Общая сводка:</b>\n"
+        message_text += f"💰 Всего запланировано: <b>{total_planned_all:.0f} руб.</b>\n"
+        message_text += f"✅ Всего оплачено: <b>{total_paid_all:.0f} руб.</b>\n"
+        remaining = total_planned_all - total_paid_all
+        if remaining > 0:
+            message_text += f"⏳ Осталось оплатить: <b>{remaining:.0f} руб.</b>\n"
+        
+        # Получаем данные для кнопок абонементов (как раньше)
+        planned_payments = sheets_service.get_planned_payments()
+        grouped_payments = {}
+        
+        for payment in planned_payments:
+            key = payment['key']
+            if key not in grouped_payments:
+                grouped_payments[key] = {
+                    'child_name': payment['child_name'],
+                    'circle_name': payment['circle_name'],
+                    'payments': []
+                }
+            grouped_payments[key]['payments'].append(payment)
+        
+        # Создаем кнопки для каждого абонемента (как раньше)
+        keyboard = []
+        
+        if grouped_payments:
+            message_text += f"\n📋 <b>Выберите абонемент для продления:</b>"
+            
+            for key, group in grouped_payments.items():
+                child_name = group['child_name']
+                circle_name = group['circle_name']
+                payment_count = len(group['payments'])
+                
+                button_text = f"{child_name} - {circle_name} ({payment_count})"
+                callback_data = f"forecast_sub_{key}"
+                keyboard.append([InlineKeyboardButton(button_text, callback_data=callback_data)])
+        
+        keyboard.append([InlineKeyboardButton("⏪ Назад в главное меню", callback_data="main_menu")])
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await query.edit_message_text(message_text, reply_markup=reply_markup, parse_mode='HTML')
+    return MAIN_MENU
+
+async def forecast_manage_subscriptions_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Показывает список абонементов для управления оплатами."""
+    query = update.callback_query
+    await query.answer()
+    await query.edit_message_text("🔄 Загружаю список абонементов...")
+
+    logging.info("🔍 Запуск forecast_manage_subscriptions_handler")
+    
+    try:
+        # Добавляем небольшую задержку для избежания превышения квоты API
+        await asyncio.sleep(1)
+        planned_payments = sheets_service.get_planned_payments()
+        logging.info(f"📊 Получено запланированных оплат: {len(planned_payments)}")
+    except Exception as e:
+        logging.error(f"❌ Ошибка при получении запланированных оплат: {e}")
+        message_text = "❌ <b>Ошибка загрузки данных</b>\n\n"
+        message_text += f"Не удалось загрузить список абонементов: {str(e)}"
+        keyboard = [[InlineKeyboardButton("⏪ Назад к прогнозу", callback_data="menu_forecast")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(message_text, reply_markup=reply_markup, parse_mode='HTML')
+        return MAIN_MENU
+    
+    if not planned_payments:
+        message_text = "📋 <b>Управление абонементами</b>\n\n"
+        message_text += "Нет абонементов с запланированными оплатами."
+        keyboard = [[InlineKeyboardButton("⏪ Назад к прогнозу", callback_data="menu_forecast")]]
+    else:
+        # Группируем оплаты по абонементам
         grouped_payments = {}
         total_sum = 0
         
-        logging.info(f"📋 Начинаю группировку {len(planned_payments)} оплат")
         for payment in planned_payments:
-            key = payment['key']  # child_name|circle_name
-            logging.info(f"  Обрабатываю оплату с ключом: '{key}'")
+            key = payment['key']
             if key not in grouped_payments:
                 grouped_payments[key] = {
                     'child_name': payment['child_name'],
@@ -890,24 +1009,19 @@ async def forecast_menu_handler(update: Update, context: ContextTypes.DEFAULT_TY
                 }
             grouped_payments[key]['payments'].append(payment)
             
-            # Подсчитываем общую сумму
             try:
                 budget = float(payment['budget'])
                 total_sum += budget
-                logging.info(f"  Добавлен бюджет: {budget}")
             except Exception as e:
-                logging.warning(f"  Ошибка при парсинге бюджета '{payment['budget']}': {e}")
+                logging.warning(f"Ошибка при парсинге бюджета '{payment['budget']}': {e}")
         
-        logging.info(f"📊 Создано групп: {len(grouped_payments)}, общая сумма: {total_sum}")
-        
-        message_text = "📊 <b>Запланированные оплаты</b>\n\n"
+        message_text = "📋 <b>Управление абонементами</b>\n\n"
         message_text += f"Найдено <b>{len(planned_payments)}</b> запланированных оплат\n"
         message_text += f"Общая сумма: <b>{total_sum:.0f} руб.</b>\n\n"
         message_text += "Выберите абонемент для управления оплатами:"
         
         # Создаем кнопки для каждого абонемента
         keyboard = []
-        logging.info(f"🔘 Создаю кнопки для {len(grouped_payments)} групп")
         for key, group in grouped_payments.items():
             child_name = group['child_name']
             circle_name = group['circle_name']
@@ -915,11 +1029,9 @@ async def forecast_menu_handler(update: Update, context: ContextTypes.DEFAULT_TY
             
             button_text = f"{child_name} - {circle_name} ({payment_count})"
             callback_data = f"forecast_sub_{key}"
-            logging.info(f"  Создаю кнопку: '{button_text}' -> '{callback_data}'")
             keyboard.append([InlineKeyboardButton(button_text, callback_data=callback_data)])
         
-        keyboard.append([InlineKeyboardButton("⏪ Назад в главное меню", callback_data="main_menu")])
-        logging.info(f"✅ Создано {len(keyboard)} кнопок (включая кнопку 'Назад')")
+        keyboard.append([InlineKeyboardButton("⏪ Назад к прогнозу", callback_data="menu_forecast")])
     
     reply_markup = InlineKeyboardMarkup(keyboard)
     await query.edit_message_text(message_text, reply_markup=reply_markup, parse_mode='HTML')
@@ -1258,7 +1370,7 @@ async def renewal_create_handler(update: Update, context: ContextTypes.DEFAULT_T
         await query.edit_message_text("💰 Переношу прогнозные оплаты в Оплачено...")
         transfer_result = sheets_service.transfer_forecast_to_paid(subscription_key, start_date_str)
         
-        # Создаем новый абонемент
+        # Создаем новый абонемент с retry логикой
         await query.edit_message_text("✨ Создаю новый абонемент...")
         
         # Логируем данные для отладки
@@ -1266,7 +1378,31 @@ async def renewal_create_handler(update: Update, context: ContextTypes.DEFAULT_T
         logging.info(f"  📋 formatted_schedule: {formatted_schedule}")
         logging.info(f"  📋 new_sub_data['schedule']: {new_sub_data['schedule']}")
         
-        result = sheets_service.create_full_subscription(new_sub_data)
+        # Retry логика для создания абонемента
+        max_retries = 3
+        retry_delay = 2  # секунды
+        result = None
+        
+        for attempt in range(max_retries):
+            try:
+                if attempt > 0:
+                    await query.edit_message_text(f"🔄 Попытка {attempt + 1}/{max_retries}...")
+                    await asyncio.sleep(retry_delay * attempt)  # Увеличиваем задержку с каждой попыткой
+                
+                result = sheets_service.create_full_subscription(new_sub_data)
+                break  # Успешно создано, выходим из цикла
+                
+            except Exception as e:
+                error_str = str(e)
+                logging.warning(f"⚠️ Попытка {attempt + 1} не удалась: {error_str}")
+                
+                if attempt == max_retries - 1:  # Последняя попытка
+                    result = f"❌ Не удалось создать абонемент после {max_retries} попыток: {error_str}"
+                elif "httpx.ReadError" in error_str or "timeout" in error_str.lower():
+                    continue  # Повторяем для сетевых ошибок
+                else:
+                    result = f"❌ Ошибка при создании абонемента: {error_str}"
+                    break  # Не повторяем для других ошибок
         
         if "✅" in result:
             # Запускаем фоновые обновления
@@ -2069,6 +2205,89 @@ async def handle_date_selection(update: Update, context: ContextTypes.DEFAULT_TY
     
     return SELECT_TRANSFER_DATE
 
+async def show_transfer_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Показывает выбор: перенести занятие или оставить без переноса."""
+    query = update.callback_query
+    
+    # Получаем данные о переносе
+    transfer_data = context.user_data.get('razoviy_transfer', {})
+    subscription_id = transfer_data.get('subscription_id', '')
+    child_name = transfer_data.get('child_name', '')
+    lesson_data = transfer_data.get('lesson_data', {})
+    mark = lesson_data.get('mark', '')
+    
+    message_text = f"🎯 <b>Разовый абонемент</b>\n\n"
+    message_text += f"👶 <b>Ребенок:</b> {child_name}\n"
+    message_text += f"🆔 <b>Абонемент:</b> {subscription_id}\n"
+    message_text += f"📝 <b>Отметка:</b> {mark}\n\n"
+    message_text += f"❓ <b>Что делать с занятием?</b>"
+    
+    keyboard = [
+        [InlineKeyboardButton("📅 Перенести на другую дату", callback_data="transfer_with_date")],
+        [InlineKeyboardButton("✅ Без переноса", callback_data="transfer_without_date")],
+        [InlineKeyboardButton("❌ Отмена", callback_data="cancel_transfer_choice")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    try:
+        await query.edit_message_text(message_text, reply_markup=reply_markup, parse_mode='HTML')
+    except Exception as e:
+        logging.error(f"❌ Ошибка при показе выбора переноса: {e}")
+        await query.message.reply_text(message_text, reply_markup=reply_markup, parse_mode='HTML')
+    
+    return SELECT_TRANSFER_CHOICE
+
+async def handle_transfer_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Обрабатывает выбор переноса для разового абонемента."""
+    query = update.callback_query
+    await query.answer()
+    
+    transfer_data = context.user_data.get('razoviy_transfer', {})
+    
+    if not transfer_data:
+        await query.edit_message_text("❌ Ошибка: данные переноса не найдены")
+        return MAIN_MENU
+    
+    if query.data == 'transfer_with_date':
+        # Пользователь выбрал перенести на другую дату - показываем календарь
+        logging.info(f"🎯 Пользователь выбрал перенести занятие на другую дату")
+        return await show_date_selection_calendar(update, context)
+    
+    elif query.data == 'transfer_without_date':
+        # Пользователь выбрал без переноса - просто завершаем
+        logging.info(f"🎯 Пользователь выбрал оставить без переноса")
+        
+        message_text = f"✅ <b>Отметка сохранена!</b>\n\n"
+        message_text += f"👶 <b>Ребенок:</b> {transfer_data['child_name']}\n"
+        message_text += f"📝 <b>Отметка:</b> {transfer_data['lesson_data']['mark']}\n"
+        message_text += f"🆔 <b>Абонемент:</b> {transfer_data['subscription_id']}\n\n"
+        message_text += f"📊 Статистика обновлена, новое занятие не создано."
+        
+        keyboard = [
+            [InlineKeyboardButton("📅 Календарь занятий", callback_data="menu_calendar")],
+            [InlineKeyboardButton("🏠 Главное меню", callback_data="main_menu")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(message_text, reply_markup=reply_markup, parse_mode='HTML')
+        
+        # Очищаем данные переноса
+        context.user_data.pop('razoviy_transfer', None)
+        return MAIN_MENU
+    
+    elif query.data == 'cancel_transfer_choice':
+        # Отмена выбора
+        await query.edit_message_text(
+            "❌ Выбор отменен",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("📅 Календарь занятий", callback_data="menu_calendar")
+            ]])
+        )
+        context.user_data.pop('razoviy_transfer', None)
+        return MAIN_MENU
+    
+    return SELECT_TRANSFER_CHOICE
+
 async def sync_razoviy_lesson_with_calendar(subscription_id):
     """Синхронизирует новое занятие разового абонемента с Google Calendar."""
     try:
@@ -2155,11 +2374,11 @@ async def save_attendance_mark(update: Update, context: ContextTypes.DEFAULT_TYP
         logging.info(f"📝 Сохранение отметки '{attendance_mark}' для занятия {lesson_id}")
         result = sheets_service.update_lesson_mark(lesson_id, attendance_mark)
         
-        # Проверяем, нужен ли выбор даты для разового абонемента
-        if isinstance(result, dict) and result.get('status') == 'needs_date_selection':
-            logging.info(f"🎯 Разовый абонемент требует выбора даты для переноса")
+        # Проверяем, нужен ли выбор переноса для разового абонемента
+        if isinstance(result, dict) and result.get('status') == 'needs_transfer_choice':
+            logging.info(f"🎯 Разовый абонемент требует выбора: перенести или без переноса")
             
-            # Сохраняем данные для выбора даты
+            # Сохраняем данные для выбора переноса
             context.user_data['razoviy_transfer'] = {
                 'subscription_id': result['subscription_id'],
                 'child_name': result['child_name'],
@@ -2167,8 +2386,8 @@ async def save_attendance_mark(update: Update, context: ContextTypes.DEFAULT_TYP
                 'original_query': query
             }
             
-            # Показываем календарь для выбора даты
-            return await show_date_selection_calendar(update, context)
+            # Показываем выбор переноса
+            return await show_transfer_choice(update, context)
         
         success = result if isinstance(result, bool) else True
         
@@ -3186,7 +3405,6 @@ async def select_subscription_handler(update: Update, context: ContextTypes.DEFA
             message_text += "• Прогнозные оплаты не найдены\n"
     
     keyboard = [
-        [InlineKeyboardButton("🔄 Обновить статистику", callback_data="update_stats_sub")],
         [InlineKeyboardButton("📅 Календарь занятий", callback_data="menu_calendar")],
         [InlineKeyboardButton("🗑️ Удалить", callback_data="delete_sub")],
         [InlineKeyboardButton("⏪ Назад к списку", callback_data="menu_subscriptions")],
@@ -3208,17 +3426,7 @@ async def manage_subscription_handler(update: Update, context: ContextTypes.DEFA
         query.data = 'menu_subscriptions'
         return await subscriptions_menu(update, context)
 
-    if query.data == 'update_stats_sub':
-        await query.edit_message_text(f"🔄 Обновляю статистику для абонемента `{sub_id}`...")
-        result_message = sheets_service.update_subscription_stats(sub_id)
-        
-        await query.edit_message_text(
-            result_message,
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⏪ Назад к списку", callback_data="menu_subscriptions")]])
-        )
-        return SELECT_SUBSCRIPTION
-
-    elif query.data == 'delete_sub':
+    if query.data == 'delete_sub':
         keyboard = [
             [InlineKeyboardButton("❗️ Да, удалить", callback_data="confirm_delete_yes")],
             [InlineKeyboardButton("⏪ Нет, назад", callback_data=f"select_sub_{sub_id}")],
@@ -4041,31 +4249,21 @@ async def create_sub_start_minute_handler(update: Update, context: ContextTypes.
                     f"📅 Дата начала: <b>{context.user_data['new_sub']['start_date'].strftime('%d.%m.%Y')}</b>\n\n"
                     f"Настройка расписания для <b>{day_names[day_num]}</b>\n"
                     f"⏰ Время начала: <b>{start_hour:02d}:{start_minute:02d}</b>\n\n"
-                    "Выберите время окончания занятия:")
+                    "Выберите час окончания занятия:")
     
-    # Создаем клавиатуру с временем окончания (минимум +30 минут от времени начала)
+    # Создаем клавиатуру с часами окончания (минимум +30 минут от времени начала)
     time_keyboard = []
     
-    # Вычисляем минимальное время окончания (время начала + 30 минут)
+    # Вычисляем минимальный час окончания (время начала + 30 минут)
     min_end_hour = start_hour
     min_end_minute = start_minute + 30
     if min_end_minute >= 60:
         min_end_hour += 1
         min_end_minute -= 60
     
-    # Добавляем варианты времени с шагом 30 минут
+    # Добавляем варианты часов (только часы, без минут)
     for hour in range(min_end_hour, 23):
-        if hour == min_end_hour:
-            # Для первого часа начинаем с минимальной минуты
-            if min_end_minute == 0:
-                time_keyboard.append([InlineKeyboardButton(f"{hour:02d}:00", callback_data=f"end_time_{hour}_0")])
-                time_keyboard.append([InlineKeyboardButton(f"{hour:02d}:30", callback_data=f"end_time_{hour}_30")])
-            elif min_end_minute == 30:
-                time_keyboard.append([InlineKeyboardButton(f"{hour:02d}:30", callback_data=f"end_time_{hour}_30")])
-        else:
-            # Для остальных часов добавляем оба варианта (00 и 30)
-            time_keyboard.append([InlineKeyboardButton(f"{hour:02d}:00", callback_data=f"end_time_{hour}_0")])
-            time_keyboard.append([InlineKeyboardButton(f"{hour:02d}:30", callback_data=f"end_time_{hour}_30")])
+        time_keyboard.append([InlineKeyboardButton(f"{hour:02d}:00", callback_data=f"end_hour_{hour}")])
     
     time_keyboard.append([InlineKeyboardButton("⏪ Назад к минутам начала", callback_data="back_to_start_minute")])
     reply_markup = InlineKeyboardMarkup(time_keyboard)
@@ -4074,17 +4272,13 @@ async def create_sub_start_minute_handler(update: Update, context: ContextTypes.
     return CREATE_SUB_SCHEDULE_END_HOUR
 
 async def create_sub_end_hour_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Обрабатывает выбор времени окончания занятия."""
+    """Обрабатывает выбор часа окончания занятия."""
     query = update.callback_query
     await query.answer()
     
-    # Парсим время окончания из callback_data (формат: end_time_hour_minute)
-    data_parts = query.data.split('_')
-    end_hour = int(data_parts[2])
-    end_minute = int(data_parts[3])
-    
+    # Парсим час окончания из callback_data (формат: end_hour_X)
+    end_hour = int(query.data.split('_')[2])
     context.user_data['current_end_hour'] = end_hour
-    context.user_data['current_end_minute'] = end_minute
     
     start_hour = context.user_data['current_start_hour']
     start_minute = context.user_data['current_start_minute']
@@ -4097,19 +4291,35 @@ async def create_sub_end_hour_handler(update: Update, context: ContextTypes.DEFA
                     f"📅 Дата начала: <b>{context.user_data['new_sub']['start_date'].strftime('%d.%m.%Y')}</b>\n\n"
                     f"Настройка расписания для <b>{day_names[day_num]}</b>\n"
                     f"⏰ Время начала: <b>{start_hour:02d}:{start_minute:02d}</b>\n"
-                    f"⏰ Время окончания: <b>{end_hour:02d}:{end_minute:02d}</b>\n\n"
-                    "✅ Время занятия настроено!")
+                    f"⏰ Час окончания: <b>{end_hour:02d}:__</b>\n\n"
+                    "Выберите минуты окончания занятия:")
     
-    # Создаем клавиатуру для подтверждения или изменения
-    keyboard = [
-        [InlineKeyboardButton("✅ Подтвердить время", callback_data="confirm_schedule_time")],
-        [InlineKeyboardButton("🔄 Изменить время начала", callback_data="back_to_start_hour")],
-        [InlineKeyboardButton("🔄 Изменить время окончания", callback_data="back_to_end_time_selection")]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    # Создаем клавиатуру с минутами окончания (с шагом 5 минут)
+    minute_keyboard = []
+    
+    # Вычисляем минимальные минуты окончания
+    start_total_minutes = start_hour * 60 + start_minute
+    min_end_total_minutes = start_total_minutes + 30  # Минимум +30 минут
+    min_end_hour = min_end_total_minutes // 60
+    min_end_minute = min_end_total_minutes % 60
+    
+    # Если выбранный час меньше минимального, показываем все минуты
+    # Если равен минимальному, показываем только подходящие минуты
+    if end_hour > min_end_hour:
+        # Можно выбрать любые минуты
+        for minute in range(0, 60, 5):
+            minute_keyboard.append([InlineKeyboardButton(f"{minute:02d}", callback_data=f"end_minute_{minute}")])
+    elif end_hour == min_end_hour:
+        # Показываем только минуты >= минимальных
+        for minute in range(0, 60, 5):
+            if minute >= min_end_minute:
+                minute_keyboard.append([InlineKeyboardButton(f"{minute:02d}", callback_data=f"end_minute_{minute}")])
+    
+    minute_keyboard.append([InlineKeyboardButton("⏪ Назад к выбору часа", callback_data="back_to_end_hour_selection")])
+    reply_markup = InlineKeyboardMarkup(minute_keyboard)
     
     await query.edit_message_text(message_text, reply_markup=reply_markup, parse_mode='HTML')
-    return CREATE_SUB_SCHEDULE_CONFIRM
+    return CREATE_SUB_SCHEDULE_END_MINUTE
 
 async def create_sub_end_minute_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Обрабатывает выбор минут окончания занятия."""
@@ -4741,7 +4951,7 @@ def create_conversation_handler() -> ConversationHandler:
                 CallbackQueryHandler(subscriptions_menu, pattern='^menu_subscriptions$') 
             ],
             MANAGE_SUBSCRIPTION: [
-                CallbackQueryHandler(manage_subscription_handler, pattern='^(edit_sub|duplicate_sub|update_stats_sub|delete_sub)$'),
+                CallbackQueryHandler(manage_subscription_handler, pattern='^(edit_sub|duplicate_sub|delete_sub)$'),
                 CallbackQueryHandler(calendar_menu, pattern='^menu_calendar$'),
                 CallbackQueryHandler(subscriptions_menu, pattern='^menu_subscriptions$'),
                 CallbackQueryHandler(select_subscription_handler, pattern='^select_sub_')
@@ -4804,7 +5014,7 @@ def create_conversation_handler() -> ConversationHandler:
                 CallbackQueryHandler(back_to_start_hour_selection_handler, pattern='^back_to_start_hour_selection$')
             ],
             CREATE_SUB_SCHEDULE_END_HOUR: [
-                CallbackQueryHandler(create_sub_end_hour_handler, pattern='^end_time_'),
+                CallbackQueryHandler(create_sub_end_hour_handler, pattern='^end_hour_'),
                 CallbackQueryHandler(back_to_start_minute_handler, pattern='^back_to_start_minute$')
             ],
             CREATE_SUB_SCHEDULE_END_MINUTE: [
@@ -4843,6 +5053,10 @@ def create_conversation_handler() -> ConversationHandler:
                 CallbackQueryHandler(handle_date_selection, pattern='^(select_date_|cancel_date_selection|date_cal_)'),
                 CallbackQueryHandler(calendar_menu, pattern='^menu_calendar$')
             ],
+            SELECT_TRANSFER_CHOICE: [
+                CallbackQueryHandler(handle_transfer_choice, pattern='^(transfer_with_date|transfer_without_date|cancel_transfer_choice)'),
+                CallbackQueryHandler(calendar_menu, pattern='^menu_calendar$')
+            ],
             
             # Subscription Renewal states
             RENEWAL_SELECT_DATE_TYPE: [
@@ -4862,6 +5076,7 @@ def create_conversation_handler() -> ConversationHandler:
         fallbacks=[
             CommandHandler('cancel', cancel), 
             CommandHandler('start', start),
+            CallbackQueryHandler(go_back_to_main_menu, pattern='^main_menu$'),
         ],
         allow_reentry=True,
     )

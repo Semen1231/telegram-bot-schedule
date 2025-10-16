@@ -953,49 +953,96 @@ class GoogleSheetsService:
             
             logging.info(f"Определены последние абонементы для {len(latest_subscriptions)} групп")
             
-            # Парсим календарь занятий для определения дней недели по абонементам
-            subscription_days = {}
-            logging.info("Анализ календаря занятий для определения дней недели...")
+            # Получаем данные из листа "Шаблон расписания"
+            try:
+                template_sheet = self.spreadsheet.worksheet("Шаблон расписания")
+                template_data = template_sheet.get_all_values()
+            except Exception as e:
+                logging.error(f"❌ Не удалось получить лист 'Шаблон расписания': {e}")
+                return 0, ["Ошибка доступа к листу 'Шаблон расписания'"]
             
-            for i, row in enumerate(calendar_data[1:], 2):
-                if len(row) < 4:
+            # Парсим шаблон расписания для получения дней недели по абонементам
+            subscription_schedule = {}
+            logging.info("Анализ шаблона расписания для определения дней недели...")
+            
+            for i, row in enumerate(template_data[1:], 2):
+                if len(row) < 3:
                     continue
                 
-                # Получаем ID абонемента из столбца B и дату из столбца C
-                sub_id = str(row[1]).strip() if len(row) > 1 else ""  # B:B - ID абонемента
-                date_str = str(row[2]).strip() if len(row) > 2 else ""  # C:C - Дата занятия
+                # Получаем ID абонемента и день недели из шаблона
+                sub_id = str(row[1]).strip() if len(row) > 1 else ""  # B:B - ID абонемента (как в get_subscription_schedule)
+                day_str = str(row[2]).strip() if len(row) > 2 else ""  # C:C - День недели как число
+                
+                if not sub_id or not day_str:
+                    continue
                 
                 # Проверяем, есть ли такой ID в наших абонементах
-                if sub_id:
-                    found = False
-                    for key, latest_sub in latest_subscriptions.items():
-                        if latest_sub['sub_id'] == sub_id:
-                            found = True
-                            break
-                    if not found:
-                        sub_id = ""
+                found = False
+                for key, latest_sub in latest_subscriptions.items():
+                    if latest_sub['sub_id'] == sub_id:
+                        found = True
+                        break
+                if not found:
+                    continue
+                
+                # Преобразуем день недели из числа в формат Python (0=понедельник, 6=воскресенье)
+                try:
+                    day_of_week_num = int(day_str)  # 1=понедельник, 7=воскресенье
+                    day_of_week = (day_of_week_num - 1) % 7  # Конвертируем в Python формат
+                except (ValueError, TypeError):
+                    logging.warning(f"Некорректный день недели '{day_str}' для абонемента {sub_id}")
+                    continue
+                
+                if day_of_week is not None:
+                    if sub_id not in subscription_schedule:
+                        subscription_schedule[sub_id] = set()
+                    subscription_schedule[sub_id].add(day_of_week)
+                    logging.debug(f"Найден шаблон: {sub_id} -> {day_str} (день недели: {day_of_week})")
+            
+            # Конвертируем множества в списки
+            for sub_id in subscription_schedule:
+                subscription_schedule[sub_id] = list(subscription_schedule[sub_id])
+            
+            logging.info(f"Найдены шаблоны расписания для {len(subscription_schedule)} абонементов")
+            
+            # Находим дату последнего занятия для каждого абонемента из календаря занятий
+            last_lesson_dates = {}
+            logging.info("Поиск дат последних занятий в календаре...")
+            
+            for i, row in enumerate(calendar_data[1:], 2):
+                if len(row) < 3:
+                    continue
+                
+                sub_id = str(row[1]).strip() if len(row) > 1 else ""  # B:B - ID абонемента
+                date_str = str(row[2]).strip() if len(row) > 2 else ""  # C:C - Дата занятия
                 
                 if not sub_id or not date_str:
                     continue
                 
+                # Проверяем, есть ли такой ID в наших абонементах
+                found = False
+                for key, latest_sub in latest_subscriptions.items():
+                    if latest_sub['sub_id'] == sub_id:
+                        found = True
+                        break
+                if not found:
+                    continue
+                
                 try:
                     lesson_date = datetime.strptime(date_str, '%d.%m.%Y')
-                    day_of_week = lesson_date.weekday()  # 0=понедельник, 6=воскресенье
                     
-                    if sub_id not in subscription_days:
-                        subscription_days[sub_id] = set()
-                    subscription_days[sub_id].add(day_of_week)
+                    if sub_id not in last_lesson_dates:
+                        last_lesson_dates[sub_id] = lesson_date
+                    else:
+                        if lesson_date > last_lesson_dates[sub_id]:
+                            last_lesson_dates[sub_id] = lesson_date
                     
-                    logging.debug(f"Найдено занятие: {sub_id} -> {date_str} (день недели: {day_of_week})")
+                    logging.debug(f"Найдено занятие: {sub_id} -> {date_str}")
                     
                 except ValueError:
                     continue
             
-            # Конвертируем множества в списки
-            for sub_id in subscription_days:
-                subscription_days[sub_id] = list(subscription_days[sub_id])
-            
-            logging.info(f"Найдены дни недели для {len(subscription_days)} абонементов")
+            logging.info(f"Найдены последние занятия для {len(last_lesson_dates)} абонементов")
             
             # Шаг 3: Циклическое прогнозирование для каждой пары "Ребенок-Кружок"
             forecast_rows = []
@@ -1007,8 +1054,15 @@ class GoogleSheetsService:
             for key, latest_sub in latest_subscriptions.items():
                 logging.info(f"=== Обрабатываю группу: {key} ===")
                 
-                # Проверяем наличие дней недели из календаря занятий для этого абонемента
-                if latest_sub['sub_id'] not in subscription_days:
+                # Проверяем наличие шаблона расписания для этого абонемента
+                if latest_sub['sub_id'] not in subscription_schedule:
+                    error_msg = f"{latest_sub['child_name']} - {latest_sub['circle_name']}: не найден шаблон расписания для ID {latest_sub['sub_id']}"
+                    skipped_forecasts.append(error_msg)
+                    logging.warning(error_msg)
+                    continue
+                
+                # Проверяем наличие последнего занятия в календаре
+                if latest_sub['sub_id'] not in last_lesson_dates:
                     error_msg = f"{latest_sub['child_name']} - {latest_sub['circle_name']}: не найдены занятия в календаре для ID {latest_sub['sub_id']}"
                     skipped_forecasts.append(error_msg)
                     logging.warning(error_msg)
@@ -1020,26 +1074,27 @@ class GoogleSheetsService:
                     logging.warning(error_msg)
                     continue
                 
-                # Начальная точка: "Дата окончания прогноз" последнего абонемента
-                current_end_date = latest_sub['end_date']
-                lesson_days = subscription_days[latest_sub['sub_id']]
+                # НОВАЯ ЛОГИКА: Начальная точка - дата последнего занятия из календаря
+                last_lesson_date = last_lesson_dates[latest_sub['sub_id']]
+                lesson_days = subscription_schedule[latest_sub['sub_id']]
                 total_classes = latest_sub['total_classes']
                 
-                logging.info(f"Начальная дата: {current_end_date.strftime('%d.%m.%Y')}, дни недели из календаря: {lesson_days}, занятий: {total_classes}")
+                logging.info(f"Последнее занятие: {last_lesson_date.strftime('%d.%m.%Y')}, дни недели из шаблона: {lesson_days}, занятий: {total_classes}")
                 
-                # Циклическое прогнозирование
+                # НОВАЯ ЛОГИКА: Циклическое прогнозирование на основе последнего занятия
+                current_date = last_lesson_date
                 loop_counter = 0
                 max_loops = 12  # Защита от бесконечного цикла
                 
-                while current_end_date <= end_of_period and loop_counter < max_loops:
+                while loop_counter < max_loops:
                     loop_counter += 1
                     logging.debug(f"Итерация {loop_counter} для {key}")
                     
-                    # Поиск даты следующей оплаты (первое занятие нового виртуального абонемента)
-                    search_date = current_end_date + timedelta(days=1)
+                    # Поиск даты следующего занятия (= дата оплаты нового абонемента)
+                    search_date = current_date + timedelta(days=1)
                     next_payment_date = None
                     
-                    # Ищем первый подходящий день недели после окончания предыдущего абонемента
+                    # Ищем первый подходящий день недели из шаблона расписания
                     for _ in range(14):  # Максимум 2 недели поиска
                         if search_date.weekday() in lesson_days:
                             next_payment_date = search_date
@@ -1052,25 +1107,19 @@ class GoogleSheetsService:
                     
                     logging.debug(f"Найдена дата следующей оплаты: {next_payment_date.strftime('%d.%m.%Y')}")
                     
-                    # Проверка и запись в прогноз
+                    # Проверка периода прогноза
+                    if next_payment_date > end_of_period:
+                        logging.debug(f"Дата {next_payment_date.strftime('%d.%m.%Y')} выходит за период прогноза")
+                        break
+                    
+                    # Проверка и запись в прогноз (только если дата в нужном периоде)
                     if start_of_period <= next_payment_date <= end_of_period:
                         # Создаем уникальный ключ для проверки дубликатов
                         payment_key = (latest_sub['circle_name'], latest_sub['child_name'], next_payment_date.strftime('%d.%m.%Y'))
                         
                         if payment_key not in added_payments:
-                            # Определяем стоимость: ищем по ID абонемента из календаря занятий
-                            cost_to_use = latest_sub['cost']  # По умолчанию используем стоимость последнего абонемента
-                            
-                            # Ищем конкретный абонемент по ID из календаря занятий для этой группы
-                            for sub_id_from_calendar in subscription_days:
-                                if sub_id_from_calendar in subscriptions_by_id:
-                                    calendar_sub = subscriptions_by_id[sub_id_from_calendar]
-                                    # Проверяем, что это тот же ребенок и кружок
-                                    if (calendar_sub['child_name'] == latest_sub['child_name'] and 
-                                        calendar_sub['circle_name'] == latest_sub['circle_name']):
-                                        cost_to_use = calendar_sub['cost']
-                                        logging.info(f"Используем стоимость {cost_to_use} из абонемента {sub_id_from_calendar} для {key}")
-                                        break
+                            # Используем стоимость последнего абонемента
+                            cost_to_use = latest_sub['cost']
                             
                             forecast_rows.append([
                                 latest_sub['circle_name'],  # A:A (Кружок)
@@ -1086,27 +1135,25 @@ class GoogleSheetsService:
                     else:
                         logging.debug(f"Дата {next_payment_date.strftime('%d.%m.%Y')} вне периода прогноза")
                     
-                    # Расчет "виртуального" абонемента - определяем дату его окончания
-                    virtual_end_date = next_payment_date
-                    classes_found = 0
+                    # Расчет "виртуального" абонемента - определяем дату последнего занятия
+                    virtual_last_lesson_date = next_payment_date
+                    classes_found = 1  # Первое занятие = дата оплаты
                     
-                    # Считаем занятия от даты начала виртуального абонемента
-                    calc_date = next_payment_date
+                    # Считаем оставшиеся занятия от даты начала виртуального абонемента
+                    calc_date = next_payment_date + timedelta(days=1)
                     safety_counter = 0
                     
                     while classes_found < total_classes and safety_counter < 365:
                         if calc_date.weekday() in lesson_days:
                             classes_found += 1
-                            virtual_end_date = calc_date
+                            virtual_last_lesson_date = calc_date
                         
-                        if classes_found < total_classes:
-                            calc_date += timedelta(days=1)
-                        
+                        calc_date += timedelta(days=1)
                         safety_counter += 1
                     
                     if classes_found == total_classes:
-                        current_end_date = virtual_end_date
-                        logging.debug(f"Виртуальный абонемент закончится: {virtual_end_date.strftime('%d.%m.%Y')}")
+                        current_date = virtual_last_lesson_date
+                        logging.debug(f"Виртуальный абонемент: последнее занятие {virtual_last_lesson_date.strftime('%d.%m.%Y')}")
                     else:
                         logging.warning(f"Не удалось рассчитать окончание виртуального абонемента для {key}")
                         break
@@ -1121,6 +1168,55 @@ class GoogleSheetsService:
                 logging.info(f"✅ Записано {len(forecast_rows)} строк в лист 'Прогноз'")
             else:
                 logging.info("ℹ️ Нет данных для записи в прогноз")
+            
+            # Шаг 5: Обновляем "Дата окончания прогноз" в листе "Абонементы"
+            logging.info("Шаг 5: Обновление дат окончания прогноз в абонементах...")
+            
+            # Находим первую дату оплаты для каждого абонемента и обновляем столбец L
+            subscription_next_payment = {}
+            for row in forecast_rows:
+                circle_name = row[0]  # A:A (Кружок)
+                child_name = row[1]   # B:B (Ребенок)
+                payment_date_str = row[2]  # C:C (Дата оплаты)
+                
+                key = f"{child_name}|{circle_name}"
+                if key not in subscription_next_payment:
+                    subscription_next_payment[key] = payment_date_str
+                else:
+                    # Сравниваем даты и берем более раннюю
+                    try:
+                        current_date = datetime.strptime(subscription_next_payment[key], '%d.%m.%Y')
+                        new_date = datetime.strptime(payment_date_str, '%d.%m.%Y')
+                        if new_date < current_date:
+                            subscription_next_payment[key] = payment_date_str
+                    except ValueError:
+                        pass
+            
+            # Обновляем столбец L в листе "Абонементы"
+            updated_subscriptions = 0
+            for key, next_payment_date in subscription_next_payment.items():
+                child_name, circle_name = key.split('|')
+                
+                # Находим соответствующий абонемент в latest_subscriptions
+                for latest_key, latest_sub in latest_subscriptions.items():
+                    if latest_key == key:
+                        try:
+                            # Находим строку абонемента в листе
+                            for i, row in enumerate(subs_data[1:], 2):
+                                if (len(row) > 11 and 
+                                    str(row[1]).strip() == latest_sub['sub_id'] and  # B:B - ID абонемента
+                                    str(row[2]).strip() == child_name and  # C:C - Ребенок
+                                    str(row[3]).strip() == circle_name):   # D:D - Кружок
+                                    
+                                    # Обновляем столбец L (индекс 11) - Дата окончания прогноз
+                                    subs_sheet.update_cell(i, 12, next_payment_date)  # L:L = колонка 12
+                                    updated_subscriptions += 1
+                                    logging.info(f"✅ Обновлена дата окончания прогноз для {latest_sub['sub_id']}: {next_payment_date}")
+                                    break
+                        except Exception as e:
+                            logging.error(f"Ошибка обновления даты окончания прогноз для {key}: {e}")
+            
+            logging.info(f"📅 Обновлено дат окончания прогноз: {updated_subscriptions}")
             
             logging.info("=== ЗАВЕРШЕНИЕ ФОРМИРОВАНИЯ ПРОГНОЗА БЮДЖЕТА ===")
             logging.info(f"📊 Найдено ожидаемых платежей: {len(forecast_rows)}")
@@ -2446,48 +2542,57 @@ class GoogleSheetsService:
             calendar_sheet.update_cell(lesson_row, 5, new_status)
             logging.info(f"Обновлен статус для занятия {lesson_id}: {new_status}")
             
-            # Проверяем, нужно ли создать новое занятие при отмене, переносе или пропуске по вине
-            if mark.lower() in ['пропуск (по вине)', 'отмена (болезнь)', 'отмена (другое)', 'перенос']:
-                # Получаем данные отмененного занятия
-                canceled_lesson_data = data[lesson_row - 1]  # -1 потому что lesson_row начинается с 1
-                subscription_id = canceled_lesson_data[1]  # B:B - ID абонемента
-                child_name = canceled_lesson_data[5]  # F:F - Ребенок
+            # Получаем данные занятия для проверки типа абонемента
+            lesson_data_row = data[lesson_row - 1]  # -1 потому что lesson_row начинается с 1
+            subscription_id = lesson_data_row[1]  # B:B - ID абонемента
+            child_name = lesson_data_row[5]  # F:F - Ребенок
+            
+            # Проверяем тип абонемента
+            subscription_info = self.get_subscription_details(subscription_id)
+            if subscription_info:
+                subscription_type = subscription_info.get('subscription_type', '').lower()
                 
-                # Проверяем тип абонемента
-                subscription_info = self.get_subscription_details(subscription_id)
-                if subscription_info:
-                    subscription_type = subscription_info.get('subscription_type', '').lower()
+                # Для разовых абонементов показываем выбор переноса ТОЛЬКО для трех конкретных отметок
+                if subscription_type == 'разовый':
+                    # Проверяем, нужен ли выбор переноса для этой отметки
+                    transfer_marks = ['пропуск (по вине)', 'отмена (болезнь)', 'перенос']
                     
-                    if subscription_type == 'разовый':
-                        logging.info(f"🎯 Разовый абонемент {subscription_id} требует выбора даты для переноса")
+                    if mark.lower() in transfer_marks:
+                        logging.info(f"🎯 Разовый абонемент {subscription_id} - показываем выбор переноса для отметки '{mark}'")
                         
-                        # Обновляем статистику пропущенных занятий для разового абонемента
-                        if mark.lower() in ['пропуск (по вине)', 'отмена (болезнь)', 'отмена (другое)', 'перенос']:
-                            self._update_razoviy_missed_classes_stats(subscription_id)
+                        # Обновляем статистику пропущенных занятий
+                        self._update_razoviy_missed_classes_stats(subscription_id)
                         
-                        # Возвращаем специальный статус для разовых абонементов
+                        # Возвращаем специальный статус для выбора переноса
                         return {
-                            'status': 'needs_date_selection',
+                            'status': 'needs_transfer_choice',
                             'subscription_id': subscription_id,
                             'child_name': child_name,
                             'lesson_data': {
                                 'lesson_id': lesson_id,
-                                'date': canceled_lesson_data[2],  # C:C - Дата занятия
-                                'start_time': canceled_lesson_data[3],  # D:D - Время начала
-                                'end_time': canceled_lesson_data[7],  # H:H - Время завершения
+                                'date': lesson_data_row[2],  # C:C - Дата занятия
+                                'start_time': lesson_data_row[3],  # D:D - Время начала
+                                'end_time': lesson_data_row[7],  # H:H - Время завершения
                                 'mark': mark
                             }
                         }
                     else:
-                        logging.info(f"Обнаружена отмена/перенос занятия {lesson_id}, создаю замещающее занятие...")
-                        
-                        # Создаем новое занятие взамен отмененного
-                        replacement_created = self._create_replacement_lesson(subscription_id, child_name)
-                        if replacement_created:
-                            logging.info(f"✅ Создано замещающее занятие для абонемента {subscription_id}")
-                        else:
-                            logging.warning(f"⚠️ Не удалось создать замещающее занятие для абонемента {subscription_id}")
-                else:
+                        # Для отметки "Посещение" просто обновляем без выбора переноса
+                        logging.info(f"🎯 Разовый абонемент {subscription_id} - отметка '{mark}' без выбора переноса")
+            
+            # Проверяем, нужно ли создать новое занятие при отмене, переносе или пропуске по вине (для обычных абонементов)
+            if mark.lower() in ['пропуск (по вине)', 'отмена (болезнь)', 'отмена (другое)', 'перенос']:
+                # Проверяем тип абонемента (если не разовый)
+                if subscription_info and subscription_info.get('subscription_type', '').lower() != 'разовый':
+                    logging.info(f"Обнаружена отмена/перенос занятия {lesson_id}, создаю замещающее занятие...")
+                    
+                    # Создаем новое занятие взамен отмененного
+                    replacement_created = self._create_replacement_lesson(subscription_id, child_name)
+                    if replacement_created:
+                        logging.info(f"✅ Создано замещающее занятие для абонемента {subscription_id}")
+                    else:
+                        logging.warning(f"⚠️ Не удалось создать замещающее занятие для абонемента {subscription_id}")
+                elif not subscription_info:
                     logging.warning(f"⚠️ Не удалось получить информацию об абонементе {subscription_id}")
             
             # Синхронизация календаря будет выполнена в фоновом процессе
@@ -2943,8 +3048,12 @@ class GoogleSheetsService:
         try:
             logging.info("📊 Получение запланированных оплат...")
             
+            logging.info("📋 Подключение к листу 'Прогноз'...")
             forecast_sheet = self.spreadsheet.worksheet("Прогноз")
+            
+            logging.info("📋 Загрузка данных из листа...")
             all_data = forecast_sheet.get_all_values()
+            logging.info(f"📋 Загружено {len(all_data)} строк данных")
             
             if len(all_data) <= 1:
                 logging.info("Нет данных в листе 'Прогноз'")
@@ -3023,6 +3132,147 @@ class GoogleSheetsService:
         except Exception as e:
             logging.error(f"Ошибка при получении оплаченных платежей: {e}")
             return []
+
+    def get_budget_forecast_by_weeks(self):
+        """Получает прогноз бюджета по месяцам и неделям с данными из листов 'Прогноз' и 'Оплачено'."""
+        try:
+            from datetime import datetime, timedelta
+            import calendar
+            
+            logging.info("📊 Получение прогноза бюджета по неделям...")
+            
+            # Получаем данные из обоих листов
+            planned_payments = self.get_planned_payments()
+            paid_payments = self.get_paid_payments()
+            
+            # Получаем текущий месяц и следующий
+            now = datetime.now()
+            current_month = now.month
+            current_year = now.year
+            
+            # Следующий месяц
+            if current_month == 12:
+                next_month = 1
+                next_year = current_year + 1
+            else:
+                next_month = current_month + 1
+                next_year = current_year
+            
+            months_data = {}
+            
+            # Русские названия месяцев
+            russian_months = {
+                1: "Январь", 2: "Февраль", 3: "Март", 4: "Апрель",
+                5: "Май", 6: "Июнь", 7: "Июль", 8: "Август",
+                9: "Сентябрь", 10: "Октябрь", 11: "Ноябрь", 12: "Декабрь"
+            }
+            
+            # Обрабатываем оба месяца
+            for month, year in [(current_month, current_year), (next_month, next_year)]:
+                month_name = russian_months[month]
+                month_key = f"{year}-{month:02d}"
+                
+                months_data[month_key] = {
+                    'name': f"{month_name} {year}",
+                    'weeks': {},
+                    'total_planned': 0,
+                    'total_paid': 0
+                }
+                
+                # Получаем все дни месяца
+                _, days_in_month = calendar.monthrange(year, month)
+                
+                # Группируем по неделям
+                for day in range(1, days_in_month + 1):
+                    date = datetime(year, month, day)
+                    week_number = date.isocalendar()[1]  # Номер недели в году
+                    week_key = f"week_{week_number}"
+                    
+                    if week_key not in months_data[month_key]['weeks']:
+                        # Определяем диапазон недели
+                        week_start = date - timedelta(days=date.weekday())
+                        week_end = week_start + timedelta(days=6)
+                        
+                        months_data[month_key]['weeks'][week_key] = {
+                            'number': week_number,
+                            'start_date': week_start.strftime('%d.%m'),
+                            'end_date': week_end.strftime('%d.%m'),
+                            'planned': 0,
+                            'paid': 0
+                        }
+            
+            # Обрабатываем запланированные платежи
+            for payment in planned_payments:
+                try:
+                    # Парсим дату (формат может быть разный)
+                    payment_date_str = payment['payment_date']
+                    payment_date = self._parse_date(payment_date_str)
+                    
+                    if payment_date:
+                        month_key = f"{payment_date.year}-{payment_date.month:02d}"
+                        if month_key in months_data:
+                            week_number = payment_date.isocalendar()[1]
+                            week_key = f"week_{week_number}"
+                            
+                            budget = float(payment['budget']) if payment['budget'] else 0
+                            
+                            if week_key in months_data[month_key]['weeks']:
+                                months_data[month_key]['weeks'][week_key]['planned'] += budget
+                                months_data[month_key]['total_planned'] += budget
+                                
+                except Exception as e:
+                    logging.warning(f"Ошибка при обработке запланированного платежа: {e}")
+            
+            # Обрабатываем оплаченные платежи
+            for payment in paid_payments:
+                try:
+                    # Парсим дату
+                    payment_date_str = payment['payment_date']
+                    payment_date = self._parse_date(payment_date_str)
+                    
+                    if payment_date:
+                        month_key = f"{payment_date.year}-{payment_date.month:02d}"
+                        if month_key in months_data:
+                            week_number = payment_date.isocalendar()[1]
+                            week_key = f"week_{week_number}"
+                            
+                            amount = float(payment['amount']) if payment['amount'] else 0
+                            
+                            if week_key in months_data[month_key]['weeks']:
+                                months_data[month_key]['weeks'][week_key]['paid'] += amount
+                                months_data[month_key]['total_paid'] += amount
+                                
+                except Exception as e:
+                    logging.warning(f"Ошибка при обработке оплаченного платежа: {e}")
+            
+            logging.info(f"✅ Обработано данных по {len(months_data)} месяцам")
+            return months_data
+            
+        except Exception as e:
+            logging.error(f"Ошибка при получении прогноза по неделям: {e}")
+            # Возвращаем пустые данные, но не ломаем функцию
+            if "Connection aborted" in str(e) or "Connection reset" in str(e):
+                logging.warning("⚠️ Проблема с подключением к Google Sheets. Возвращаю пустые данные.")
+            return {}
+    
+    def _parse_date(self, date_str):
+        """Парсит дату из строки в различных форматах."""
+        try:
+            # Пробуем различные форматы
+            formats = ['%d.%m.%Y', '%d/%m/%Y', '%Y-%m-%d', '%d.%m.%y']
+            
+            for fmt in formats:
+                try:
+                    return datetime.strptime(date_str, fmt)
+                except ValueError:
+                    continue
+            
+            logging.warning(f"Не удалось распарсить дату: {date_str}")
+            return None
+            
+        except Exception as e:
+            logging.warning(f"Ошибка при парсинге даты '{date_str}': {e}")
+            return None
 
     def mark_payments_as_paid(self, subscription_key):
         """Отмечает все оплаты для указанного абонемента как 'Оплачено'."""
