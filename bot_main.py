@@ -115,11 +115,14 @@ def main() -> None:
     # 6. Запускаем бота
     logger.info("Запускаю polling...")
     try:
-        application.run_polling()
+        application.run_polling(drop_pending_updates=True)  # Очищаем pending updates
     except KeyboardInterrupt:
         logger.info("Получен сигнал остановки (Ctrl+C)")
     except Exception as e:
-        logger.error(f"Критическая ошибка: {e}")
+        if "Conflict" in str(e) and "terminated by other getUpdates request" in str(e):
+            logger.error("❌ Конфликт: другой экземпляр бота уже запущен. Остановите предыдущий экземпляр.")
+        else:
+            logger.error(f"Критическая ошибка: {e}")
     finally:
         logger.info("Бот остановлен.")
 

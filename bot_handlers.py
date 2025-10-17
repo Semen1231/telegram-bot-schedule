@@ -234,7 +234,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     # Формируем главное меню с еженедельной сводкой (если доступна)
     try:
         # Пытаемся получить еженедельную сводку, но не блокируем показ меню
-        weekly_summary = sheets_service.get_weekly_summary()
+        if sheets_service is not None:
+            weekly_summary = sheets_service.get_weekly_summary()
+        else:
+            weekly_summary = None
         
         if weekly_summary and weekly_summary.get('attendance_stats'):
             message_text = f"📊 <b>СВОДКА НА НЕДЕЛЮ</b>\n"
@@ -652,7 +655,10 @@ async def force_refresh_all_data(update: Update, context: ContextTypes.DEFAULT_T
         
         # Получаем еженедельную статистику
         try:
-            weekly_summary = sheets_service.get_weekly_summary()
+            if sheets_service is not None:
+                weekly_summary = sheets_service.get_weekly_summary()
+            else:
+                weekly_summary = None
             if weekly_summary:
                 stats = weekly_summary['attendance_stats']
                 message_text = f"📊 <b>СВОДКА НА НЕДЕЛЮ</b>\n"
@@ -3256,10 +3262,16 @@ async def subscriptions_menu(update: Update, context: ContextTypes.DEFAULT_TYPE)
     
     try:
         # Получаем активные абонементы
-        active_subs = sheets_service.get_active_subscriptions()
+        if sheets_service is not None:
+            active_subs = sheets_service.get_active_subscriptions()
+        else:
+            active_subs = []
         
         # Получаем прогнозы оплат для определения ближайших дат
-        forecast_data = sheets_service.get_planned_payments()
+        if sheets_service is not None:
+            forecast_data = sheets_service.get_planned_payments()
+        else:
+            forecast_data = []
         
         keyboard = []
         
@@ -3408,7 +3420,10 @@ async def select_subscription_handler(update: Update, context: ContextTypes.DEFA
     sub_id = query.data.replace("select_sub_", "")
     context.user_data['selected_sub_id'] = sub_id
     
-    all_subs = sheets_service.get_active_subscriptions()
+    if sheets_service is not None:
+        all_subs = sheets_service.get_active_subscriptions()
+    else:
+        all_subs = []
     selected_sub_info = next((sub for sub in all_subs if str(sub.get('ID абонемента')) == str(sub_id)), None)
     
     if not selected_sub_info:

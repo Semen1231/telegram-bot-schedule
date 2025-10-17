@@ -7474,11 +7474,41 @@ class GoogleSheetsService:
             logging.error(f"❌ Ошибка при проверке сходимости: {e}")
             return f"❌ Ошибка: {e}"
 
-# Глобальный экземпляр сервиса
-try:
-    # ИСПРАВЛЕНО: Возвращаем простую рабочую инициализацию
-    sheets_service = GoogleSheetsService(config.GOOGLE_CREDENTIALS_PATH, config.GOOGLE_SHEET_NAME)
-except Exception as e:
-    sheets_service = None
-    logging.critical(f"Не удалось инициализировать GoogleSheetsService: {e}")
+# Глобальный экземпляр сервиса с retry механизмом
+def initialize_sheets_service_with_retry():
+    """Инициализация Google Sheets с повторными попытками при ошибке 429"""
+    import time
+    max_retries = 3
+    base_delay = 30  # 30 секунд базовая задержка
+    
+    for attempt in range(max_retries):
+        try:
+            logging.info(f"Попытка {attempt + 1}/{max_retries} инициализации Google Sheets...")
+            service = GoogleSheetsService(config.GOOGLE_CREDENTIALS_PATH, config.GOOGLE_SHEET_NAME)
+            logging.info("✅ Google Sheets успешно инициализирован")
+            return service
+            
+        except Exception as e:
+            if "429" in str(e) or "Quota exceeded" in str(e):
+                if attempt < max_retries - 1:
+                    delay = base_delay * (2 ** attempt)  # Экспоненциальная задержка
+                    logging.warning(f"⚠️ Ошибка 429 при инициализации Google Sheets. Повтор через {delay} секунд...")
+                    time.sleep(delay)
+                    continue
+                else:
+                    logging.error("❌ Превышено максимальное количество попыток инициализации Google Sheets")
+                    return None
+            else:
+                logging.error(f"❌ Критическая ошибка инициализации Google Sheets: {e}")
+                return None
+    
+    return None
+
+# Инициализируем сервис
+sheets_service = initialize_sheets_service_with_retry()
+
+if sheets_service is None:
+    logging.critical("❌ Не удалось инициализировать GoogleSheetsService после всех попыток")
+else:
+    logging.info("✅ GoogleSheetsService успешно инициализирован")
 
