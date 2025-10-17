@@ -21,13 +21,19 @@ class GoogleSheetsService:
     def __init__(self, credentials_path, sheet_name):
         """Инициализация сервиса Google Sheets."""
         try:
-            # ИСПРАВЛЕНО: Возвращаем рабочую логику с правильными scopes
+            import time
+            # Добавляем задержку для снижения нагрузки на API при инициализации
+            time.sleep(5)
+            
             scope = [
                 'https://www.googleapis.com/auth/spreadsheets',
                 'https://www.googleapis.com/auth/drive'
             ]
             creds = service_account.Credentials.from_service_account_file(credentials_path, scopes=scope)
             self.client = gspread.authorize(creds)
+            
+            # Добавляем задержку перед открытием таблицы
+            time.sleep(3)
             self.spreadsheet = self.client.open(sheet_name)
             
             logging.info("✅ Google Sheets сервис успешно инициализирован")
@@ -7103,6 +7109,10 @@ class GoogleSheetsService:
         """Получает сводку на текущую неделю."""
         try:
             from datetime import datetime, timedelta
+            import time
+            
+            # Добавляем задержку для снижения нагрузки на API
+            time.sleep(2)
             
             logging.info("🔄 Начинаю получение еженедельной сводки...")
             
@@ -7123,24 +7133,34 @@ class GoogleSheetsService:
             }
             
             # Получаем занятия на эту неделю (принудительно обновляем данные)
-            calendar_sheet = self.spreadsheet.worksheet("Календарь занятий")
-            
-            # Принудительно обновляем данные из Google Sheets (очищаем кэш)
             try:
-                # Сначала получаем сырые данные для принудительного обновления
-                raw_data = calendar_sheet.get_all_values()
-                # Затем получаем структурированные данные
-                calendar_data = calendar_sheet.get_all_records()
-                logging.info(f"📋 Принудительно загружено {len(calendar_data)} записей из Календаря занятий")
+                calendar_sheet = self.spreadsheet.worksheet("Календарь занятий")
+                
+                # Принудительно обновляем данные из Google Sheets (очищаем кэш)
+                try:
+                    # Сначала получаем сырые данные для принудительного обновления
+                    raw_data = calendar_sheet.get_all_values()
+                    # Затем получаем структурированные данные
+                    calendar_data = calendar_sheet.get_all_records()
+                    logging.info(f"📋 Принудительно загружено {len(calendar_data)} записей из Календаря занятий")
+                except Exception as e:
+                    if "429" in str(e) or "Quota exceeded" in str(e):
+                        logging.warning("⚠️ Превышена квота Google Sheets API при получении календаря. Возвращаю пустую сводку.")
+                        return None
+                    logging.error(f"❌ Ошибка при загрузке календаря: {e}")
+                    # Fallback - пробуем еще раз
+                    calendar_data = calendar_sheet.get_all_records()
+                    logging.info(f"📋 Загружено {len(calendar_data)} записей из Календаря занятий (fallback)")
+                
+                # Получаем данные абонементов для определения кружков
+                subs_sheet = self.spreadsheet.worksheet("Абонементы")
+                subs_data = subs_sheet.get_all_records()
             except Exception as e:
-                logging.error(f"❌ Ошибка при загрузке календаря: {e}")
-                # Fallback - пробуем еще раз
-                calendar_data = calendar_sheet.get_all_records()
-                logging.info(f"📋 Загружено {len(calendar_data)} записей из Календаря занятий (fallback)")
-            
-            # Получаем данные абонементов для определения кружков
-            subs_sheet = self.spreadsheet.worksheet("Абонементы")
-            subs_data = subs_sheet.get_all_records()
+                if "429" in str(e) or "Quota exceeded" in str(e):
+                    logging.warning("⚠️ Превышена квота Google Sheets API при получении еженедельной сводки. Возвращаю пустую сводку.")
+                    return None
+                else:
+                    raise e
             subs_dict = {str(sub.get('ID абонемента', '')): sub for sub in subs_data}
             logging.info(f"📋 Загружено {len(subs_data)} абонементов")
             
@@ -7478,8 +7498,8 @@ class GoogleSheetsService:
 def initialize_sheets_service_with_retry():
     """Инициализация Google Sheets с повторными попытками при ошибке 429"""
     import time
-    max_retries = 3
-    base_delay = 30  # 30 секунд базовая задержка
+    max_retries = 5
+    base_delay = 60  # 60 секунд базовая задержка
     
     for attempt in range(max_retries):
         try:

@@ -6,7 +6,7 @@
  */
 
 // ========== НАСТРОЙКИ ==========
-const API_BASE_URL = "https://web-production-547b.up.railway.app"; // Ваш Railway URL
+const API_BASE_URL = "https://disabled-temporarily.local"; // ОТКЛЮЧЕНО: Ваш Railway URL
 
 // ========== ОСНОВНАЯ ФУНКЦИЯ ==========
 async function createWidget() {
