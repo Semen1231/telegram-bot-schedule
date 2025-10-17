@@ -730,7 +730,7 @@ async def update_data_in_background():
         logging.info("📊 Пропускаю массовое обновление статистики абонементов (обновляется индивидуально)")
         
         # 2. Обновляем прогноз бюджета
-        await asyncio.sleep(5)  # Увеличенная задержка для снижения нагрузки на API
+        await asyncio.sleep(15)  # Увеличенная задержка для снижения нагрузки на API
         logging.info("💰 Обновляю прогноз бюджета...")
         forecast_count, forecast_errors = sheets_service.update_full_forecast()
         logging.info(f"✅ Создано прогнозов: {forecast_count}")
@@ -782,6 +782,7 @@ async def update_stats_menu_handler(update: Update, context: ContextTypes.DEFAUL
         # calendar_count, calendar_errors = sheets_service.update_all_calendars()
         
         # Обновляем только прогноз бюджета
+        await asyncio.sleep(10)  # Добавляем задержку перед обновлением прогноза
         forecast_count, skipped_forecasts = sheets_service.update_full_forecast()
         
         # Синхронизируем прогноз с Google Calendar
@@ -2665,6 +2666,7 @@ async def update_after_subscription_creation():
         
         # 1. Обновить прогноз бюджета (создание прогнозных дат оплат)
         logging.info("1. Запуск обновления прогноза бюджета...")
+        await asyncio.sleep(5)  # Добавляем задержку перед обновлением прогноза
         sheets_service.update_full_forecast()
         logging.info("Прогноз бюджета обновлен")
         

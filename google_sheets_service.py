@@ -813,17 +813,33 @@ class GoogleSheetsService:
         """Полное обновление прогноза оплат согласно ТЗ."""
         try:
             from datetime import datetime, timedelta
+            import time
+            
+            # Добавляем задержку для снижения нагрузки на API
+            time.sleep(2)
             
             logging.info("=== НАЧАЛО ФОРМИРОВАНИЯ ПРОГНОЗА БЮДЖЕТА ===")
             
             # Шаг 1: Подготовка
-            # Получаем или создаем лист "Прогноз"
+            # Получаем или создаем лист "Прогноз" с обработкой ошибки 429
             try:
                 forecast_sheet = self.spreadsheet.worksheet("Прогноз")
-            except:
-                forecast_sheet = self.spreadsheet.add_worksheet(title="Прогноз", rows=1000, cols=5)
-                headers = ["Кружок", "Ребенок", "Дата оплаты", "Бюджет", "Статус"]
-                forecast_sheet.append_row(headers)
+            except Exception as e:
+                if "429" in str(e) or "Quota exceeded" in str(e):
+                    logging.warning("⚠️ Превышена квота Google Sheets API при получении листа 'Прогноз'. Пропускаю обновление.")
+                    return 0, ["⚠️ Прогноз пропущен из-за превышения квоты API"]
+                else:
+                    # Создаем лист если его нет
+                    try:
+                        forecast_sheet = self.spreadsheet.add_worksheet(title="Прогноз", rows=1000, cols=5)
+                        headers = ["Кружок", "Ребенок", "Дата оплаты", "Бюджет", "Статус"]
+                        forecast_sheet.append_row(headers)
+                    except Exception as e2:
+                        if "429" in str(e2) or "Quota exceeded" in str(e2):
+                            logging.warning("⚠️ Превышена квота Google Sheets API при создании листа 'Прогноз'. Пропускаю обновление.")
+                            return 0, ["⚠️ Прогноз пропущен из-за превышения квоты API"]
+                        else:
+                            raise e2
             
             # Сохранение ID событий удалено (Google Calendar отключен)
             
@@ -833,6 +849,10 @@ class GoogleSheetsService:
                     forecast_sheet.delete_rows(2, forecast_sheet.row_count)
                     logging.info(f"Очищены строки 2-{forecast_sheet.row_count} в листе 'Прогноз'")
             except Exception as e:
+                if "429" in str(e) or "Quota exceeded" in str(e):
+                    logging.warning("⚠️ Превышена квота Google Sheets API при очистке листа 'Прогноз'. Пропускаю обновление.")
+                    return 0, ["⚠️ Прогноз пропущен из-за превышения квоты API"]
+                
                 logging.warning(f"Не удалось удалить строки: {e}")
                 try:
                     if forecast_sheet.row_count > 1:
@@ -840,6 +860,9 @@ class GoogleSheetsService:
                         forecast_sheet.batch_clear([range_to_clear])
                         logging.info(f"Очищен диапазон {range_to_clear} в листе 'Прогноз'")
                 except Exception as e2:
+                    if "429" in str(e2) or "Quota exceeded" in str(e2):
+                        logging.warning("⚠️ Превышена квота Google Sheets API при очистке диапазона 'Прогноз'. Пропускаю обновление.")
+                        return 0, ["⚠️ Прогноз пропущен из-за превышения квоты API"]
                     logging.error(f"Не удалось очистить лист 'Прогноз': {e2}")
             
             # Определяем временные рамки: с первого числа текущего месяца до последнего числа следующего месяца
@@ -859,12 +882,19 @@ class GoogleSheetsService:
             
             logging.info(f"Период прогноза: {start_of_period.strftime('%d.%m.%Y')} - {end_of_period.strftime('%d.%m.%Y')}")
             
-            # Получаем данные из листов
-            subs_sheet = self.spreadsheet.worksheet("Абонементы")
-            calendar_sheet = self.spreadsheet.worksheet("Календарь занятий")
-            
-            subs_data = subs_sheet.get_all_values()
-            calendar_data = calendar_sheet.get_all_values()
+            # Получаем данные из листов с обработкой ошибки 429
+            try:
+                subs_sheet = self.spreadsheet.worksheet("Абонементы")
+                calendar_sheet = self.spreadsheet.worksheet("Календарь занятий")
+                
+                subs_data = subs_sheet.get_all_values()
+                calendar_data = calendar_sheet.get_all_values()
+            except Exception as e:
+                if "429" in str(e) or "Quota exceeded" in str(e):
+                    logging.warning("⚠️ Превышена квота Google Sheets API при формировании прогноза. Пропускаю обновление.")
+                    return 0, ["⚠️ Прогноз пропущен из-за превышения квоты API"]
+                else:
+                    raise e
             
             logging.info(f"Получено данных: абонементы={len(subs_data)}, календарь={len(calendar_data)}")
             
@@ -1229,8 +1259,12 @@ class GoogleSheetsService:
             return len(forecast_rows), skipped_forecasts
             
         except Exception as e:
-            logging.error(f"❌ Критическая ошибка при формировании прогноза бюджета: {e}", exc_info=True)
-            return 0, [f"Ошибка: {e}"]
+            if "429" in str(e) or "Quota exceeded" in str(e):
+                logging.warning("⚠️ Превышена квота Google Sheets API при формировании прогноза бюджета. Пропускаю обновление.")
+                return 0, ["⚠️ Прогноз пропущен из-за превышения квоты API"]
+            else:
+                logging.error(f"❌ Критическая ошибка при формировании прогноза бюджета: {e}", exc_info=True)
+                return 0, [f"Ошибка: {e}"]
 
     def update_all_calendars(self):
         """Обновляет календарь занятий для всех активных абонементов."""
