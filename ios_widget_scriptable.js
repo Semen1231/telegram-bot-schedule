@@ -13,7 +13,7 @@
  */
 
 // ========== НАСТРОЙКИ ==========
-const API_BASE_URL = "https://your-railway-app.railway.app"; // Замените на ваш Railway URL
+const API_BASE_URL = "https://web-production-547b.up.railway.app"; // Ваш Railway URL
 const REFRESH_INTERVAL = 15; // Интервал обновления в минутах
 
 // ========== ОСНОВНАЯ ФУНКЦИЯ ==========
@@ -45,13 +45,18 @@ async function createWidget() {
 // ========== ПОЛУЧЕНИЕ ДАННЫХ ==========
 async function fetchDashboardData() {
     console.log("Получение данных из API...");
+    console.log("API Base URL:", API_BASE_URL);
     
     // Получаем активные абонементы
     const subscriptionsUrl = `${API_BASE_URL}/api/subscriptions?student=Все`;
+    console.log("Subscriptions URL:", subscriptionsUrl);
+    
     const subscriptionsRequest = new Request(subscriptionsUrl);
     subscriptionsRequest.timeoutInterval = 10;
     
+    console.log("Отправляю запрос на получение абонементов...");
     const subscriptionsResponse = await subscriptionsRequest.loadJSON();
+    console.log("Ответ абонементов:", subscriptionsResponse);
     
     if (!subscriptionsResponse.success) {
         throw new Error("Ошибка получения данных абонементов");
@@ -59,10 +64,14 @@ async function fetchDashboardData() {
     
     // Получаем метрики
     const metricsUrl = `${API_BASE_URL}/api/metrics?student=Все`;
+    console.log("Metrics URL:", metricsUrl);
+    
     const metricsRequest = new Request(metricsUrl);
     metricsRequest.timeoutInterval = 10;
     
+    console.log("Отправляю запрос на получение метрик...");
     const metricsResponse = await metricsRequest.loadJSON();
+    console.log("Ответ метрик:", metricsResponse);
     
     return {
         subscriptions: subscriptionsResponse.subscriptions || [],
