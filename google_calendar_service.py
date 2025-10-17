@@ -145,14 +145,22 @@ class GoogleCalendarService:
                 logging.info(f"🕐 Результат парсинга с часовым поясом: {start_datetime} - {end_datetime}")
                 
                 # Формируем описание с переменными для сравнения
-                description = f"""ID занятия: {lesson_data['lesson_id']}
-ID абонемента: {lesson_data['subscription_id']}
-Статус посещения: {lesson_data['status']}
-Ребенок: {lesson_data['child']}
-Отметка: {lesson_data['mark']}
-Дата занятия: {lesson_data['date']}
-Время начала: {lesson_data['start_time']}
-Время завершения: {lesson_data['end_time']}"""
+                lesson_id = lesson_data.get('lesson_id', 'N/A')
+                subscription_id = lesson_data.get('subscription_id', 'N/A')
+                status = lesson_data.get('status', 'N/A')
+                child = lesson_data.get('child', 'N/A')
+                mark = lesson_data.get('mark', '')
+                date = lesson_data.get('date', 'N/A')
+                start_time = lesson_data.get('start_time', 'N/A')
+                
+                description = f"""ID занятия: {lesson_id}
+ID абонемента: {subscription_id}
+Статус посещения: {status}
+Ребенок: {child}
+Отметка: {mark}
+Дата занятия: {date}
+Время начала: {start_time}
+Время завершения: {lesson_data.get('end_time', 'N/A')}"""
 
                 event = {
                     'summary': summary,

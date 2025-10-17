@@ -1,11 +1,24 @@
 import logging
 import asyncio
 from datetime import datetime, timedelta
+from calendar import monthrange
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 from telegram.ext import ContextTypes, ConversationHandler, CommandHandler, CallbackQueryHandler, MessageHandler, filters
-from google_sheets_service import sheets_service
-from calendar import monthrange
-import telegram
+from google_sheets_service import GoogleSheetsService, sheets_service
+from google_calendar_service import GoogleCalendarService
+import pytz
+
+async def safe_answer_callback_query(query, text=None):
+    """Безопасно отвечает на callback query с обработкой ошибок."""
+    try:
+        await query.answer(text)
+    except Exception as e:
+        if "too old" in str(e) or "timeout expired" in str(e):
+            logging.warning(f"⚠️ Callback query устарел: {e}")
+            # Продолжаем выполнение без ответа на query
+        else:
+            logging.error(f"❌ Ошибка при ответе на callback query: {e}")
+            # Не поднимаем исключение, чтобы не ломать функциональность
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -52,6 +65,8 @@ async def delete_message_after_delay(bot, chat_id, message_id, delay_seconds):
     CALENDAR_MENU,
     INTERACTIVE_CALENDAR,
     SELECT_CALENDAR_DATE,
+    SELECT_CALENDAR_SUBSCRIPTION,
+    SELECT_LESSON,
     SELECT_LESSON_FROM_DATE,
     SELECT_ATTENDANCE_MARK,
     SELECT_TRANSFER_DATE,
@@ -72,7 +87,7 @@ async def delete_message_after_delay(bot, chat_id, message_id, delay_seconds):
     
     # Notification Settings States
     NOTIFICATION_TIME_SETTINGS,
-) = range(38)
+) = range(40)
 # === Вспомогательные функции ===
 def create_calendar_keyboard(year, month):
     keyboard = []
@@ -326,10 +341,53 @@ async def main_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     elif query.data == 'clean_duplicates':
         logging.info("🧹 Очистка дублей")
         return await clean_duplicates_handler(update, context)
+    elif query.data == 'refresh_subscriptions_data':
+        logging.info("🔄 Обновление данных абонементов")
+        return await refresh_subscriptions_data_handler(update, context)
     else:
         logging.warning(f"❓ Неизвестная команда: {query.data}")
         await query.answer("Функция в разработке", show_alert=True)
         return MAIN_MENU
+
+async def refresh_subscriptions_data_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Обработчик полного обновления данных абонементов."""
+    query = update.callback_query
+    await query.answer("🔄 Запускаю обновление...")
+    
+    await query.edit_message_text("🔄 Обновляю данные абонементов...\n\nЭто может занять несколько минут.")
+    
+    # Добавляем задержку для избежания превышения квоты API
+    await asyncio.sleep(2)
+    
+    try:
+        result = sheets_service.refresh_all_subscriptions_data()
+        
+        message_text = f"🔄 <b>Обновление данных абонементов</b>\n\n{result}\n\n"
+        message_text += "📋 Обновлены:\n"
+        message_text += "• Календарь занятий\n"
+        message_text += "• Прогноз оплат\n" 
+        message_text += "• Статусы абонементов\n\n"
+        message_text += "✅ Все данные синхронизированы!"
+        
+        keyboard = [
+            [InlineKeyboardButton("🔄 Повторить обновление", callback_data="refresh_subscriptions_data")],
+            [InlineKeyboardButton("🏠 Главное меню", callback_data="main_menu")]
+        ]
+        
+    except Exception as e:
+        logging.error(f"Ошибка при обновлении данных абонементов: {e}")
+        message_text = f"❌ <b>Ошибка обновления</b>\n\n"
+        message_text += f"Произошла ошибка: {str(e)[:200]}...\n\n"
+        message_text += "Попробуйте повторить операцию позже."
+        
+        keyboard = [
+            [InlineKeyboardButton("🔄 Повторить", callback_data="refresh_subscriptions_data")],
+            [InlineKeyboardButton("🏠 Главное меню", callback_data="main_menu")]
+        ]
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await query.edit_message_text(message_text, reply_markup=reply_markup, parse_mode='HTML')
+    return MAIN_MENU
 
 async def sync_google_calendar_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Обработчик синхронизации Google Calendar."""
@@ -667,10 +725,9 @@ async def update_data_in_background():
     try:
         logging.info("🔄 Начинаю фоновое обновление всех данных...")
         
-        # 1. Обновляем статистику абонементов
-        logging.info("📊 Обновляю статистику абонементов...")
-        calendar_count, calendar_errors = sheets_service.update_subscriptions_statistics()
-        logging.info(f"✅ Обновлено абонементов: {calendar_count}")
+        # 1. УБРАНО: update_subscriptions_statistics() - теперь обновляем только конкретный абонемент
+        # через update_subscription_stats() в select_attendance_mark()
+        logging.info("📊 Пропускаю массовое обновление статистики абонементов (обновляется индивидуально)")
         
         # 2. Обновляем прогноз бюджета
         await asyncio.sleep(5)  # Увеличенная задержка для снижения нагрузки на API
@@ -1297,7 +1354,7 @@ async def renewal_confirm_handler(update: Update, context: ContextTypes.DEFAULT_
 async def renewal_create_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Создает новый абонемент на основе текущего."""
     query = update.callback_query
-    await query.answer()
+    await safe_answer_callback_query(query)
     
     await query.edit_message_text("🔄 Создаю новый абонемент...")
     
@@ -1681,14 +1738,7 @@ def generate_calendar_keyboard(year, month, lessons_by_date):
 async def calendar_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Показывает интерактивный календарь занятий."""
     query = update.callback_query
-    try:
-        await query.answer()
-    except Exception as e:
-        if "too old" in str(e) or "timeout expired" in str(e):
-            logging.warning(f"⚠️ Callback query устарел: {e}")
-            # Продолжаем выполнение без ответа на query
-        else:
-            raise e
+    await safe_answer_callback_query(query)
     
     try:
         from datetime import datetime
@@ -2389,6 +2439,18 @@ async def save_attendance_mark(update: Update, context: ContextTypes.DEFAULT_TYP
             # Показываем выбор переноса
             return await show_transfer_choice(update, context)
         
+        # Обновляем статистику конкретного абонемента
+        if isinstance(result, dict) and result.get('success'):
+            # Получаем subscription_id из результата
+            actual_subscription_id = result.get('subscription_id')
+            if actual_subscription_id:
+                logging.info(f"🔄 Обновляю статистику для абонемента {actual_subscription_id}")
+                try:
+                    stats_result = sheets_service.update_subscription_stats(actual_subscription_id)
+                    logging.info(f"✅ Статистика обновлена: {stats_result}")
+                except Exception as e:
+                    logging.error(f"❌ Ошибка обновления статистики: {e}")
+        
         success = result if isinstance(result, bool) else True
         
         if not success:
@@ -2665,6 +2727,7 @@ async def select_calendar_subscription(update: Update, context: ContextTypes.DEF
             lesson_time = lesson.get('Время начала', '')
             status = lesson.get('Статус посещения', '')
             mark = lesson.get('Отметка', '')
+            real_row_number = lesson.get('_row_number', i+2)  # Используем реальный номер строки
             
             # Форматируем отображение
             status_emoji = {
@@ -2676,8 +2739,12 @@ async def select_calendar_subscription(update: Update, context: ContextTypes.DEF
             mark_text = f" ({mark})" if mark else ""
             button_text = f"{status_emoji} {lesson_date} {lesson_time}{mark_text}"
             
-            # Сохраняем номер строки в callback_data (i+2 потому что строка 1 - заголовки)
-            keyboard.append([InlineKeyboardButton(button_text, callback_data=f"lesson_{i+2}")])
+            # Используем РЕАЛЬНЫЙ номер строки из Google Sheets
+            keyboard.append([InlineKeyboardButton(button_text, callback_data=f"lesson_{real_row_number}")])
+            
+            # Логирование для отладки
+            import logging
+            logging.info(f"🔧 Кнопка {i+1}: '{button_text}' → lesson_{real_row_number} (строка {real_row_number} в Google Sheets)")
         
         keyboard.append([InlineKeyboardButton("⏪ Назад к списку абонементов", callback_data="menu_calendar")])
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -2724,11 +2791,37 @@ async def select_attendance_mark(update: Update, context: ContextTypes.DEFAULT_T
     
     try:
         # Обновляем отметку в Google Sheets
-        success = sheets_service.update_lesson_mark(lesson_row, mark, subscription_id)
+        result = sheets_service.update_lesson_mark(lesson_row, mark)
+        
+        # Проверяем результат
+        if isinstance(result, dict) and result.get('success'):
+            # Получаем subscription_id из результата (более надежно)
+            actual_subscription_id = result.get('subscription_id', subscription_id)
+            
+            # Обновляем статистику абонементов (столбец H, I, M)
+            logging.info(f"🔄 Вызываю update_subscription_stats для {actual_subscription_id}")
+            stats_result = sheets_service.update_subscription_stats(actual_subscription_id)
+            logging.info(f"✅ Результат update_subscription_stats: {stats_result}")
+            
+            success = True
+        elif result:
+            # Старый формат возврата (True/False)
+            success = True
+            # Обновляем статистику абонементов (столбец H, I, M)
+            logging.info(f"🔄 Вызываю update_subscription_stats для {subscription_id}")
+            stats_result = sheets_service.update_subscription_stats(subscription_id)
+            logging.info(f"✅ Результат update_subscription_stats: {stats_result}")
+        else:
+            success = False
         
         if success:
-            # Обновляем статистику абонементов
-            sheets_service.update_subscription_stats(subscription_id)
+            # Запускаем фоновое обновление для синхронизации прогноза и Google Calendar
+            try:
+                import asyncio
+                asyncio.create_task(update_data_in_background())
+                logging.info("🚀 Фоновое обновление запущено асинхронно")
+            except Exception as e:
+                logging.error(f"❌ Ошибка при запуске фонового обновления: {e}")
             
             await query.edit_message_text(
                 f"✅ Отметка '{mark}' успешно сохранена!\n\nСтатистика абонементов обновлена.",
@@ -2772,6 +2865,7 @@ async def settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         [InlineKeyboardButton("🔄 Обновить Google календарь", callback_data="sync_google_calendar")],
         [InlineKeyboardButton("💰 Google прогноз", callback_data="sync_google_forecast")],
         [InlineKeyboardButton("🧹 Очистить дубли", callback_data="clean_duplicates")],
+        [InlineKeyboardButton("📊 Обновить данные абонементов", callback_data="refresh_subscriptions_data")],
         [InlineKeyboardButton("🔄 Обновить статистику", callback_data="menu_update_stats")],
         [InlineKeyboardButton("🔄 Обновить абонементы", callback_data="menu_update_subscriptions")],
         [InlineKeyboardButton("⏪ Назад в главное меню", callback_data="main_menu")]
@@ -3621,9 +3715,9 @@ async def confirm_delete_subscription_handler(update: Update, context: ContextTy
 
 # === Логика создания абонемента ===
 async def create_sub_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Начало процесса создания абонемента."""
+    """Начинает процесс создания нового абонемента."""
     query = update.callback_query
-    await query.answer()
+    await safe_answer_callback_query(query)
     
     try:
         context.user_data['new_sub'] = {'schedule': []}
@@ -5036,6 +5130,17 @@ def create_conversation_handler() -> ConversationHandler:
                 CallbackQueryHandler(start, pattern='^(start|main_menu)$'),
                 CallbackQueryHandler(calendar_menu, pattern='^menu_calendar$')
             ],
+            SELECT_CALENDAR_SUBSCRIPTION: [
+                CallbackQueryHandler(select_calendar_subscription, pattern='^calendar_sub_'),
+                CallbackQueryHandler(calendar_menu, pattern='^menu_calendar$'),
+                CallbackQueryHandler(start, pattern='^main_menu$')
+            ],
+            SELECT_LESSON: [
+                CallbackQueryHandler(select_lesson, pattern='^lesson_'),
+                CallbackQueryHandler(select_calendar_subscription, pattern='^calendar_sub_'),
+                CallbackQueryHandler(calendar_menu, pattern='^menu_calendar$'),
+                CallbackQueryHandler(start, pattern='^main_menu$')
+            ],
             SELECT_LESSON_FROM_DATE: [
                 CallbackQueryHandler(select_lesson_from_date, pattern='^lesson_select_'),
                 CallbackQueryHandler(select_calendar_date, pattern='^calendar_date_'),
@@ -5044,7 +5149,8 @@ def create_conversation_handler() -> ConversationHandler:
                 CallbackQueryHandler(calendar_menu, pattern='^menu_calendar$')
             ],
             SELECT_ATTENDANCE_MARK: [
-                CallbackQueryHandler(save_attendance_mark, pattern='^attendance_mark_'),
+                CallbackQueryHandler(select_attendance_mark, pattern='^mark_'),  # Для кнопок отметок (mark_посещение, mark_пропуск, и т.д.)
+                CallbackQueryHandler(save_attendance_mark, pattern='^attendance_mark_'),  # Для уведомлений
                 CallbackQueryHandler(cancel_notification_handler, pattern='^cancel_notification_'),  # Для отмены уведомлений
                 CallbackQueryHandler(select_calendar_date, pattern='^calendar_date_'),
                 CallbackQueryHandler(calendar_menu, pattern='^menu_calendar$')

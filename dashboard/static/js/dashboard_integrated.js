@@ -109,15 +109,16 @@ class Dashboard {
             const currentFilter = 'Все';
             
             // Загружаем все данные параллельно
-            const [filtersResponse, metricsResponse, subscriptionsResponse, calendarResponse] = await Promise.all([
+            const [filtersResponse, metricsResponse, subscriptionsResponse, completedSubscriptionsResponse, calendarResponse] = await Promise.all([
                 fetch(`${this.apiBaseUrl}/api/filters`),
                 fetch(`${this.apiBaseUrl}/api/metrics?student=${encodeURIComponent(currentFilter)}`),
                 fetch(`${this.apiBaseUrl}/api/subscriptions?student=${encodeURIComponent(currentFilter)}`),
+                fetch(`${this.apiBaseUrl}/api/completed-subscriptions?student=${encodeURIComponent(currentFilter)}`),
                 fetch(`${this.apiBaseUrl}/api/calendar?student=${encodeURIComponent(currentFilter)}`)
             ]);
             
             // Проверяем ответы
-            if (!filtersResponse.ok || !metricsResponse.ok || !subscriptionsResponse.ok || !calendarResponse.ok) {
+            if (!filtersResponse.ok || !metricsResponse.ok || !subscriptionsResponse.ok || !completedSubscriptionsResponse.ok || !calendarResponse.ok) {
                 throw new Error('Ошибка загрузки данных с сервера');
             }
             
@@ -125,17 +126,20 @@ class Dashboard {
             const filters = await filtersResponse.json();
             const metrics = await metricsResponse.json();
             const subscriptions = await subscriptionsResponse.json();
+            const completedSubscriptions = await completedSubscriptionsResponse.json();
             const calendar = await calendarResponse.json();
             
             console.log('✅ Данные загружены успешно');
             console.log('📊 Metrics:', metrics);
             console.log('📈 Subscriptions:', subscriptions);
+            console.log('🏁 Completed Subscriptions:', completedSubscriptions);
             
             // Сохраняем данные
             this.dashboardData = {
                 filters: filters.filters || ['Все'],
                 metrics: metrics,
                 subscriptions: subscriptions.subscriptions || [],
+                completedSubscriptions: completedSubscriptions.completed_subscriptions || [],
                 calendar: calendar.events || []
             };
             
@@ -250,8 +254,9 @@ class Dashboard {
     
     updateDashboard() {
         // Календарь убран - используется Google Calendar
-        // Обновляем только прогресс абонементов
+        // Обновляем прогресс активных и завершенных абонементов
         this.renderSubscriptionsProgress();
+        this.renderCompletedSubscriptionsProgress();
         // Метрики обновляются через updateApiMetrics() после загрузки данных
     }
 
@@ -487,6 +492,112 @@ class Dashboard {
                        ${progressBarHTML}
                     </div>
                     ${missed > 0 ? `<div class="text-xs mt-2"><span class="gradient-text-orange font-bold">Пропущено: ${missed}</span></div>` : ''}
+                </div>
+            `;
+            container.innerHTML += cardHTML;
+        });
+        
+        // Добавляем обработчики для tooltip
+        if (tooltip) {
+            container.querySelectorAll('.progress-segment').forEach(segment => {
+                segment.addEventListener('mousemove', (e) => {
+                    const data = e.target.dataset;
+                    tooltip.style.display = 'block';
+                    tooltip.style.left = `${e.pageX + 10}px`;
+                    tooltip.style.top = `${e.pageY + 10}px`;
+                    const timeRange = data.start && data.end ? `${data.start} - ${data.end}` : data.start || 'Время не указано';
+                    tooltip.innerHTML = `
+                        <div class="font-bold text-white">${data.date}</div>
+                        <div class="text-gray-400">${timeRange}</div>
+                        <div class="text-gray-400">Статус: ${data.status}</div>
+                        <div class="text-gray-400">ID: ${data.id}</div>
+                    `;
+                });
+                segment.addEventListener('mouseout', () => {
+                    tooltip.style.display = 'none';
+                });
+            });
+        }
+    }
+
+    renderCompletedSubscriptionsProgress() {
+        const container = document.getElementById('completed-subscriptions-container');
+        const tooltip = document.getElementById('tooltip');
+        if (!container) return;
+        
+        container.innerHTML = '';
+
+        // Используем данные завершенных абонементов из API
+        const completedSubscriptions = this.dashboardData?.completedSubscriptions || [];
+
+        if (completedSubscriptions.length === 0) {
+            container.innerHTML = '<div class="text-gray-400 text-center py-4">Нет завершенных абонементов</div>';
+            return;
+        }
+
+        completedSubscriptions.forEach(sub => {
+            const total = sub.total_lessons || 0;
+            const completed = sub.completed_lessons || 0;
+            const remaining = sub.remaining_lessons || 0;
+            const progressPercentage = sub.progress_percent || (total > 0 ? (completed / total) * 100 : 100);
+            const missedTotal = sub.missed_total || 0;
+            
+            // Отладочная информация
+            console.log('🏁 DEBUG Completed Subscription:', {
+                name: sub.name,
+                total_lessons: sub.total_lessons,
+                completed_lessons: sub.completed_lessons,
+                progress_percent: sub.progress_percent,
+                status: sub.status
+            });
+            
+            let progressBarHTML = '';
+            const lessons = sub.lessons || [];
+            
+            // Создаем сегменты для всех занятий
+            for (let i = 0; i < total; i++) {
+                const lesson = lessons[i];
+                let segmentClass = 'bg-gray-700';
+                let segmentStyle = '';
+                
+                if (lesson) {
+                    if (lesson.status === 'Посещение' || lesson.attendance === 'Посещение') {
+                        // Для завершенных абонементов используем зеленые оттенки
+                        const startColor = [34, 197, 94];  // green-500
+                        const endColor = [21, 128, 61];   // green-700
+                        const ratio = total > 1 ? i / (total - 1) : 1;
+                        const r = Math.round(startColor[0] * (1 - ratio) + endColor[0] * ratio);
+                        const g = Math.round(startColor[1] * (1 - ratio) + endColor[1] * ratio);
+                        const b = Math.round(startColor[2] * (1 - ratio) + endColor[2] * ratio);
+                        segmentStyle = `background-color: rgb(${r}, ${g}, ${b});`;
+                    } else if (lesson.status === 'Пропуск' || lesson.attendance === 'Пропуск') {
+                        segmentClass = 'bg-red-500';
+                    }
+                }
+                
+                progressBarHTML += `<div class="progress-segment ${segmentClass}" style="${segmentStyle}"
+                    data-id="${sub.id}"
+                    data-date="${lesson?.date || ''}"
+                    data-status="${lesson?.status || lesson?.attendance || 'Завершен'}"
+                    data-start="${lesson?.time || lesson?.start_time || ''}"
+                    data-end="${lesson?.end_time || ''}"
+                ></div>`;
+            }
+
+            const cardHTML = `
+                <div class="bg-black/20 p-4 rounded-lg border border-green-700/30">
+                    <div class="flex justify-between items-center mb-2">
+                        <span class="font-bold text-white text-sm">${sub.title || sub.name}</span>
+                        <div class="flex items-center gap-2">
+                            <span class="text-xs bg-green-600 text-white px-2 py-1 rounded">Завершен</span>
+                            <span class="text-sm text-gray-400">Прошло: ${completed} / ${total}</span>
+                            <span class="text-sm font-bold text-green-400 ml-2">${Math.round(progressPercentage)}%</span>
+                        </div>
+                    </div>
+                    <div class="progress-bar-container">
+                       ${progressBarHTML}
+                    </div>
+                    ${missedTotal > 0 ? `<div class="text-xs mt-2"><span class="text-red-400 font-bold">Всего пропущено: ${missedTotal}</span></div>` : ''}
                 </div>
             `;
             container.innerHTML += cardHTML;

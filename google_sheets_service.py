@@ -1337,6 +1337,10 @@ class GoogleSheetsService:
             current_date = start_date
             classes_generated = 0
             
+            # Получаем максимальный существующий ID для генерации уникальных ID
+            max_id = self._get_next_unique_lesson_id(calendar_sheet) - 1
+            logging.info(f"🔢 Максимальный существующий ID в календаре: {max_id}")
+            
             # Получаем данные абонемента для заполнения
             subs_sheet = self.spreadsheet.worksheet("Абонементы")
             sub_cell = subs_sheet.find(str(sub_id))
@@ -1357,8 +1361,9 @@ class GoogleSheetsService:
                     schedule_day = schedule_item['day']
                     if day_of_week == schedule_day:
                         # Добавляем занятие в календарь согласно правильной структуре
+                        unique_id = max_id + classes_generated + 1  # Генерируем уникальный ID
                         calendar_rows.append([
-                            classes_generated + 1,  # A:A - № (номер по порядку)
+                            str(unique_id),  # A:A - № (уникальный ID)
                             sub_id,  # B:B - ID абонемента
                             current_date.strftime('%d.%m.%Y'),  # C:C - Дата занятия
                             self.format_time(schedule_item.get('start_time', '')),  # D:D - Время начала
@@ -1368,6 +1373,7 @@ class GoogleSheetsService:
                             self.format_time(schedule_item.get('end_time', ''))  # H:H - Время завершения
                         ])
                         classes_generated += 1
+                        logging.debug(f"🔢 Создано занятие с уникальным ID: {unique_id}")
                         break
                 
                 current_date += timedelta(days=1)
@@ -1660,9 +1666,17 @@ class GoogleSheetsService:
                     attended = subscription_stats[sub_id]['attended']
                     missed = subscription_stats[sub_id]['missed']
                     
-                    # Определяем новый статус
+                    # Определяем новый статус на основе реального столбца I (Осталось занятий)
+                    current_remaining_from_sheet = 0
+                    try:
+                        # Получаем текущее значение из столбца I (индекс 8)
+                        if len(sub_info['data']) > 8 and sub_info['data'][8]:
+                            current_remaining_from_sheet = int(sub_info['data'][8])
+                    except (ValueError, IndexError):
+                        current_remaining_from_sheet = 0
+                    
                     new_status = sub_info['status']
-                    if remaining_classes <= 0:
+                    if current_remaining_from_sheet <= 0:
                         new_status = "Завершен"
                     elif attended > 0 and sub_info['status'].lower() == "ожидает":
                         new_status = "Активен"
@@ -1674,7 +1688,8 @@ class GoogleSheetsService:
                     
                     # Обновляем согласно логике ТЗ:
                     row_data[7] = str(attended)  # H:H - Прошло занятий (количество "Посещение")
-                    row_data[8] = str(remaining_classes)  # I:I - Осталось занятий (сгенерированные будущие)
+                    # ВАЖНО: НЕ обновляем столбец I (Осталось занятий) - он должен оставаться независимым!
+                    # row_data[8] = str(remaining_classes)  # I:I - НЕ ТРОГАЕМ этот столбец!
                     row_data[12] = str(missed)  # M:M - Пропущено (все виды пропусков)
                     row_data[9] = new_status  # J:J - Статус (автоматически)
                     
@@ -2466,11 +2481,36 @@ class GoogleSheetsService:
             return []
 
     def get_lessons_by_subscription(self, subscription_id):
-        """Получает занятия для конкретного абонемента."""
+        """Получает занятия для конкретного абонемента с номерами строк."""
         try:
             calendar_sheet = self.spreadsheet.worksheet("Календарь занятий")
-            data = calendar_sheet.get_all_records()
-            return [lesson for lesson in data if str(lesson.get('ID абонемента', '')).strip() == str(subscription_id).strip()]
+            all_data = calendar_sheet.get_all_values()
+            
+            if not all_data:
+                return []
+            
+            headers = all_data[0]
+            lessons_with_rows = []
+            
+            for i, row in enumerate(all_data[1:], 2):  # Начинаем с строки 2 (1 - заголовки)
+                if len(row) > 1:  # Проверяем что есть данные
+                    lesson_subscription_id = row[1] if len(row) > 1 else ''  # B - ID абонемента
+                    
+                    if str(lesson_subscription_id).strip() == str(subscription_id).strip():
+                        # Создаем словарь с данными занятия
+                        lesson = {}
+                        for j, header in enumerate(headers):
+                            lesson[header] = row[j] if j < len(row) else ''
+                        
+                        # Добавляем номер строки для правильного сопоставления
+                        lesson['_row_number'] = i
+                        lessons_with_rows.append(lesson)
+            
+            logging.info(f"📋 Найдено {len(lessons_with_rows)} занятий для абонемента {subscription_id}")
+            for lesson in lessons_with_rows:
+                logging.info(f"   Строка {lesson['_row_number']}: {lesson.get('Дата занятия', '')} - {lesson.get('Статус посещения', '')}")
+            
+            return lessons_with_rows
         except Exception as e:
             logging.error(f"Ошибка при получении занятий для абонемента {subscription_id}: {e}")
             return []
@@ -2529,7 +2569,7 @@ class GoogleSheetsService:
             
             # Обновляем столбец G (отметка)
             calendar_sheet.update_cell(lesson_row, 7, mark)
-            logging.info(f"Обновлена отметка для занятия {lesson_id}: {mark}")
+            logging.info(f"✅ Обновлена отметка для занятия (строка {lesson_row}, столбец G): {mark}")
             
             # Обновляем статус посещения в столбце E
             status_map = {
@@ -2540,7 +2580,7 @@ class GoogleSheetsService:
             }
             new_status = status_map.get(mark.lower(), 'Запланировано')
             calendar_sheet.update_cell(lesson_row, 5, new_status)
-            logging.info(f"Обновлен статус для занятия {lesson_id}: {new_status}")
+            logging.info(f"✅ Обновлен статус для занятия (строка {lesson_row}, столбец E): {new_status}")
             
             # Получаем данные занятия для проверки типа абонемента
             lesson_data_row = data[lesson_row - 1]  # -1 потому что lesson_row начинается с 1
@@ -2595,10 +2635,14 @@ class GoogleSheetsService:
                 elif not subscription_info:
                     logging.warning(f"⚠️ Не удалось получить информацию об абонементе {subscription_id}")
             
-            # Синхронизация календаря будет выполнена в фоновом процессе
-            logging.info("Отметка сохранена, синхронизация календаря будет выполнена в фоне")
+            # Столбец I (Осталось занятий) будет автоматически пересчитан в update_subscription_stats()
+            # на основе количества занятий со статусом "Запланировано"
             
-            return True
+            # Синхронизация календаря будет выполнена в фоновом процессе
+            logging.info("✅ Отметка сохранена, столбцы H/I/M будут обновлены в update_subscription_stats()")
+            
+            # Возвращаем subscription_id для обновления статистики
+            return {'success': True, 'subscription_id': subscription_id}
         except Exception as e:
             import httpx
             error_msg = str(e)
@@ -2616,6 +2660,267 @@ class GoogleSheetsService:
             else:
                 logging.error(f"❌ Ошибка при обновлении отметки занятия {lesson_id}: {e}")
                 return False
+
+    def _update_remaining_lessons(self, subscription_id, change):
+        """Обновляет количество оставшихся занятий в столбце I листа 'Абонементы'."""
+        try:
+            logging.info(f"🔍 Обновление столбца I для {subscription_id}, изменение: {change}")
+            
+            subs_sheet = self.spreadsheet.worksheet("Абонементы")
+            cell = subs_sheet.find(str(subscription_id))
+            
+            if cell:
+                headers = subs_sheet.row_values(1)
+                row_values = subs_sheet.row_values(cell.row)
+                
+                if 'Осталось занятий' in headers:
+                    remaining_col = headers.index('Осталось занятий') + 1
+                    
+                    # Получаем текущее значение
+                    current_remaining = 0
+                    if len(row_values) > remaining_col - 1:
+                        try:
+                            current_remaining = int(row_values[remaining_col - 1]) if row_values[remaining_col - 1] else 0
+                        except ValueError:
+                            current_remaining = 0
+                    
+                    # Применяем изменение
+                    new_remaining = max(0, current_remaining + change)  # Не даем уйти в минус
+                    
+                    # Обновляем значение
+                    subs_sheet.update_cell(cell.row, remaining_col, new_remaining)
+                    
+                    # Обновляем статус на основе оставшихся занятий
+                    if 'Статус' in headers:
+                        status_col = headers.index('Статус') + 1
+                        if new_remaining <= 0:
+                            subs_sheet.update_cell(cell.row, status_col, 'Завершен')
+                        else:
+                            subs_sheet.update_cell(cell.row, status_col, 'Активен')
+                    
+                    logging.info(f"📊 Обновлено 'Осталось занятий' для {subscription_id}: {current_remaining} → {new_remaining}")
+                    return True
+                else:
+                    logging.error(f"Столбец 'Осталось занятий' не найден в листе 'Абонементы'")
+                    return False
+            else:
+                logging.error(f"Абонемент {subscription_id} не найден в листе 'Абонементы'")
+                return False
+                
+        except Exception as e:
+            logging.error(f"Ошибка при обновлении оставшихся занятий для {subscription_id}: {e}")
+            return False
+
+    def refresh_all_subscriptions_data(self):
+        """Полное обновление всех данных после изменения столбца I (Осталось занятий)."""
+        try:
+            logging.info("🔄 Запуск полного обновления данных абонементов...")
+            
+            # 1. Получаем все активные абонементы
+            subs_sheet = self.spreadsheet.worksheet("Абонементы")
+            subs_data = subs_sheet.get_all_records()
+            
+            updated_count = 0
+            
+            for sub in subs_data:
+                subscription_id = sub.get('ID абонемента', '')
+                remaining_lessons = sub.get('Осталось занятий', 0)
+                
+                if subscription_id and remaining_lessons:
+                    try:
+                        remaining_int = int(remaining_lessons)
+                        
+                        # Обновляем статус на основе оставшихся занятий
+                        if remaining_int > 0:
+                            # 2. Создаем занятия в календаре на основе шаблона
+                            self._create_lessons_from_template(subscription_id, remaining_int)
+                            
+                            # 3. Создаем записи в прогнозе
+                            self._create_forecast_entries(subscription_id)
+                            
+                            updated_count += 1
+                            logging.info(f"✅ Обновлен абонемент {subscription_id} ({remaining_int} занятий)")
+                        else:
+                            logging.info(f"⏭️ Пропущен завершенный абонемент {subscription_id}")
+                            
+                    except ValueError:
+                        logging.warning(f"⚠️ Некорректное значение 'Осталось занятий' для {subscription_id}: {remaining_lessons}")
+                        continue
+            
+            logging.info(f"🎯 Обновлено {updated_count} абонементов")
+            return f"✅ Обновлено {updated_count} абонементов"
+            
+        except Exception as e:
+            logging.error(f"❌ Ошибка при полном обновлении данных: {e}")
+            return f"❌ Ошибка: {str(e)}"
+
+    def _create_lessons_from_template(self, subscription_id, lessons_count):
+        """Создает занятия в календаре на основе шаблона расписания."""
+        try:
+            # Получаем информацию об абонементе
+            sub_info = self.get_subscription_details(subscription_id)
+            if not sub_info:
+                logging.error(f"Не найдена информация об абонементе {subscription_id}")
+                return False
+            
+            # Получаем шаблон расписания
+            template_sheet = self.spreadsheet.worksheet("Шаблон расписания")
+            template_data = template_sheet.get_all_records()
+            
+            # Ищем шаблон для данного абонемента
+            template_row = None
+            for row in template_data:
+                if str(row.get('ID абонемента', '')).strip() == str(subscription_id).strip():
+                    template_row = row
+                    break
+            
+            if not template_row:
+                logging.error(f"Не найден шаблон расписания для {subscription_id}")
+                return False
+            
+            # Создаем занятия на основе шаблона
+            from datetime import datetime, timedelta
+            
+            # Получаем расписание из шаблона
+            schedule = {}
+            days_map = {
+                'Понедельник': 0, 'Вторник': 1, 'Среда': 2, 'Четверг': 3,
+                'Пятница': 4, 'Суббота': 5, 'Воскресенье': 6
+            }
+            
+            for day, day_num in days_map.items():
+                if template_row.get(day):
+                    time_range = template_row.get(day, '').strip()
+                    if time_range and '-' in time_range:
+                        start_time, end_time = time_range.split('-')
+                        schedule[day_num] = {
+                            'start_time': start_time.strip(),
+                            'end_time': end_time.strip()
+                        }
+            
+            if not schedule:
+                logging.error(f"Не найдено расписание в шаблоне для {subscription_id}")
+                return False
+            
+            # Создаем занятия начиная с ближайшей даты
+            calendar_sheet = self.spreadsheet.worksheet("Календарь занятий")
+            
+            # Получаем максимальный существующий ID для генерации уникальных ID
+            max_id = self._get_next_unique_lesson_id(calendar_sheet) - 1
+            logging.info(f"🔢 Максимальный существующий ID для разовых занятий: {max_id}")
+            
+            current_date = datetime.now().date()
+            created_lessons = 0
+            
+            while created_lessons < lessons_count:
+                weekday = current_date.weekday()
+                
+                if weekday in schedule:
+                    # Создаем занятие на эту дату с уникальным ID
+                    unique_id = max_id + created_lessons + 1
+                    lesson_data = [
+                        str(unique_id),  # A: № (уникальный ID)
+                        subscription_id,  # B: ID абонемента
+                        current_date.strftime('%d.%m.%Y'),  # C: Дата занятия
+                        schedule[weekday]['start_time'],  # D: Время начала
+                        'Запланировано',  # E: Статус посещения
+                        sub_info.get('child_name', ''),  # F: Ребенок
+                        '',  # G: Отметка
+                        schedule[weekday]['end_time'],  # H: Время завершения
+                        sub_info.get('circle_name', ''),  # I: Кружок
+                    ]
+                    
+                    calendar_sheet.append_row(lesson_data)
+                    created_lessons += 1
+                    logging.info(f"📅 Создано занятие {subscription_id} на {current_date} с ID {unique_id}")
+                
+                current_date += timedelta(days=1)
+                
+                # Защита от бесконечного цикла
+                if (current_date - datetime.now().date()).days > 365:
+                    logging.warning(f"Превышен лимит поиска дат для {subscription_id}")
+                    break
+            
+            logging.info(f"✅ Создано {created_lessons} занятий для {subscription_id}")
+            return True
+            
+        except Exception as e:
+            logging.error(f"Ошибка при создании занятий из шаблона для {subscription_id}: {e}")
+            return False
+
+    def _create_forecast_entries(self, subscription_id):
+        """Создает записи в листе Прогноз для абонемента."""
+        try:
+            # Получаем информацию об абонементе
+            sub_info = self.get_subscription_details(subscription_id)
+            if not sub_info:
+                return False
+            
+            # Получаем данные о занятиях из календаря
+            calendar_sheet = self.spreadsheet.worksheet("Календарь занятий")
+            calendar_data = calendar_sheet.get_all_records()
+            
+            # Фильтруем занятия по ID абонемента
+            subscription_lessons = [
+                lesson for lesson in calendar_data 
+                if str(lesson.get('ID абонемента', '')).strip() == str(subscription_id).strip()
+            ]
+            
+            if not subscription_lessons:
+                logging.info(f"Нет занятий в календаре для {subscription_id}")
+                return True
+            
+            # Группируем занятия по месяцам для создания записей в прогнозе
+            from datetime import datetime
+            from collections import defaultdict
+            
+            monthly_groups = defaultdict(list)
+            
+            for lesson in subscription_lessons:
+                lesson_date_str = lesson.get('Дата занятия', '')
+                if lesson_date_str:
+                    try:
+                        lesson_date = datetime.strptime(lesson_date_str, '%d.%m.%Y')
+                        month_key = lesson_date.strftime('%Y-%m')
+                        monthly_groups[month_key].append(lesson)
+                    except ValueError:
+                        continue
+            
+            # Создаем записи в прогнозе для каждого месяца
+            forecast_sheet = self.spreadsheet.worksheet("Прогноз")
+            
+            for month_key, lessons in monthly_groups.items():
+                # Вычисляем дату оплаты (первое число месяца)
+                year, month = month_key.split('-')
+                payment_date = f"01.{month}.{year}"
+                
+                # Вычисляем бюджет (количество занятий * стоимость)
+                lessons_count = len(lessons)
+                cost_per_lesson = sub_info.get('cost', 0)
+                try:
+                    cost_per_lesson = float(cost_per_lesson) if cost_per_lesson else 0
+                except ValueError:
+                    cost_per_lesson = 0
+                
+                total_budget = lessons_count * cost_per_lesson
+                
+                # Создаем запись в прогнозе
+                forecast_data = [
+                    sub_info.get('circle_name', ''),  # A: Кружок
+                    sub_info.get('child_name', ''),   # B: Ребенок
+                    payment_date,                     # C: Дата оплаты
+                    total_budget,                     # D: Бюджет
+                    'Оплата запланирована',           # E: Статус
+                ]
+                
+                forecast_sheet.append_row(forecast_data)
+                logging.info(f"💰 Создана запись прогноза для {subscription_id}: {month_key}, {total_budget} руб.")
+            
+            return True
+            
+        except Exception as e:
+            logging.error(f"Ошибка при создании записей прогноза для {subscription_id}: {e}")
+            return False
 
     def _create_replacement_lesson(self, subscription_id, child_name):
         """Создает замещающее занятие при отмене, основываясь на шаблоне расписания."""
@@ -2699,14 +3004,44 @@ class GoogleSheetsService:
             logging.error(f"❌ Ошибка при создании замещающего занятия: {e}")
             return False
 
+    def _get_next_unique_lesson_id(self, calendar_sheet=None):
+        """Получает следующий уникальный ID для занятия."""
+        try:
+            if calendar_sheet is None:
+                calendar_sheet = self.spreadsheet.worksheet("Календарь занятий")
+            
+            all_data = calendar_sheet.get_all_values()
+            
+            # Находим максимальный существующий ID в столбце A
+            max_id = 0
+            for i, row in enumerate(all_data):
+                if i == 0:  # Пропускаем заголовки
+                    continue
+                if len(row) > 0 and row[0]:  # Проверяем что есть значение в столбце A
+                    try:
+                        current_id = int(str(row[0]).strip())
+                        if current_id > max_id:
+                            max_id = current_id
+                    except (ValueError, TypeError):
+                        continue  # Пропускаем нечисловые значения
+            
+            # Следующий ID = максимальный + 1
+            next_id = max_id + 1
+            logging.debug(f"🔢 Генерируем уникальный ID: максимальный существующий = {max_id}, новый = {next_id}")
+            return next_id
+            
+        except Exception as e:
+            logging.error(f"Ошибка при получении уникального ID: {e}")
+            return 1  # Fallback ID
+
     def _add_lesson_to_calendar(self, subscription_id, child_name, lesson_date, start_time, end_time):
         """Добавляет новое занятие в календарь занятий."""
         try:
             calendar_sheet = self.spreadsheet.worksheet("Календарь занятий")
             
-            # Получаем следующий ID для занятия
-            all_data = calendar_sheet.get_all_values()
-            next_id = len(all_data)  # Простой способ получить следующий ID
+            # Получаем следующий уникальный ID для занятия
+            next_id = self._get_next_unique_lesson_id(calendar_sheet)
+            logging.info(f"🔢 Создаем замещающее занятие с уникальным ID: {next_id}")
             
             # Получаем информацию об абонементе для определения кружка
             subscription_info = self.get_subscription_details(subscription_id)
@@ -2982,66 +3317,19 @@ class GoogleSheetsService:
         return self.get_handbook_items('Оплата')
     
     def update_subscription_stats(self, subscription_id):
-        """Обновляет статистику абонемента на основе данных из календаря."""
+        """Обновляет статистику абонемента на основе данных из календаря с проверкой сходимости."""
         try:
-            # Получаем данные из календаря занятий
-            cal_sheet = self.spreadsheet.worksheet("Календарь занятий")
-            all_cal_values = cal_sheet.get_all_values()
+            logging.info(f"🔄 Обновление статистики для абонемента {subscription_id}")
             
-            if not all_cal_values:
-                return "❌ Календарь занятий пуст."
+            # Используем новую функцию проверки и исправления данных
+            result = self.validate_subscription_data_consistency(subscription_id)
+            logging.info(f"📊 Результат проверки сходимости: {result}")
             
-            cal_headers = all_cal_values[0]
-            cal_records = []
-            for row in all_cal_values[1:]:
-                record = dict(zip(cal_headers, row))
-                cal_records.append(record)
-            
-            # Фильтруем записи по ID абонемента
-            sub_classes = [
-                record for record in cal_records 
-                if record.get('ID абонемента') == str(subscription_id)
-            ]
-            
-            if not sub_classes:
-                return f"❌ Не найдено занятий для абонемента `{subscription_id}`."
-            
-            # Подсчитываем статистику
-            attended_count = sum(1 for cls in sub_classes if cls.get('Статус', '').lower() == 'посещено')
-            total_scheduled = len(sub_classes)
-            
-            # Обновляем данные в листе абонементов
-            subs_sheet = self.spreadsheet.worksheet("Абонементы")
-            try:
-                cell = subs_sheet.find(str(subscription_id))
-                if cell:
-                    # Получаем заголовки для определения колонок
-                    headers = subs_sheet.row_values(1)
-                    row_values = subs_sheet.row_values(cell.row)
-                    
-                    # Обновляем посещенные занятия
-                    if 'Посещено занятий' in headers:
-                        attended_col = headers.index('Посещено занятий') + 1
-                        subs_sheet.update_cell(cell.row, attended_col, attended_count)
-                    
-                    # Обновляем оставшиеся занятия
-                    if 'Осталось занятий' in headers and 'Всего занятий' in headers:
-                        total_col = headers.index('Всего занятий') + 1
-                        remaining_col = headers.index('Осталось занятий') + 1
-                        total_classes = int(row_values[total_col - 1]) if len(row_values) > total_col - 1 else 0
-                        remaining = max(0, total_classes - attended_count)
-                        subs_sheet.update_cell(cell.row, remaining_col, remaining)
-                    
-                    return f"✅ Статистика обновлена:\n📊 Посещено: {attended_count}\n📅 Всего запланировано: {total_scheduled}"
-                else:
-                    return f"❌ Абонемент `{subscription_id}` не найден в таблице."
-                    
-            except gspread.exceptions.CellNotFound:
-                return f"❌ Абонемент `{subscription_id}` не найден."
+            return result
                 
         except Exception as e:
             logging.error(f"Ошибка при обновлении статистики для {subscription_id}: {e}")
-            return f"❌ Произошла ошибка при обновлении статистики: {e}"
+            return f"❌ Ошибка: {e}"
 
     def get_planned_payments(self):
         """Получает все запланированные оплаты из листа 'Прогноз' со статусом 'Оплата запланирована'."""
@@ -6957,8 +7245,15 @@ class GoogleSheetsService:
                 if status.lower() == 'активен' or (remaining_lessons and int(remaining_lessons) > 0):
                     child = str(sub.get('Ребенок', '')).strip()
                     circle = str(sub.get('Кружок', '')).strip()
-                    total_lessons = sub.get('К-во занятий', 0)  # Столбец E
+                    
+                    # Получаем данные из правильных столбцов
+                    completed_lessons = sub.get('Прошло занятий', 0)  # Столбец H
                     remaining = sub.get('Осталось занятий', 0)  # Столбец I
+                    
+                    # Вычисляем общее количество: прошло + осталось
+                    completed = int(completed_lessons) if completed_lessons else 0
+                    remaining_int = int(remaining) if remaining else 0
+                    total_lessons = completed + remaining_int
                     
                     # Ищем дату оплаты в прогнозе
                     key = f"{child}_{circle}"
@@ -6989,8 +7284,9 @@ class GoogleSheetsService:
                     sub_info = {
                         'child': child,
                         'circle': circle,
-                        'total_lessons': int(total_lessons) if total_lessons else 0,
-                        'remaining_lessons': int(remaining) if remaining else 0,
+                        'total_lessons': total_lessons,
+                        'remaining_lessons': remaining_int,
+                        'completed_lessons': completed,
                         'next_payment_date': next_payment,
                         'status': status
                     }
@@ -7042,6 +7338,107 @@ class GoogleSheetsService:
             error_message = f"❌ Ошибка при очистке дублированных событий: {str(e)}"
             logging.error(error_message)
             return error_message
+
+    def validate_subscription_data_consistency(self, subscription_id=None):
+        """
+        Проверяет и исправляет сходимость данных между календарем и абонементами.
+        Если subscription_id указан, проверяет только этот абонемент.
+        Иначе проверяет все абонементы.
+        """
+        try:
+            logging.info(f"🔍 Проверка сходимости данных для {'всех абонементов' if not subscription_id else f'абонемента {subscription_id}'}")
+            
+            # Получаем данные из календаря
+            cal_sheet = self.spreadsheet.worksheet("Календарь занятий")
+            cal_data = cal_sheet.get_all_values()
+            
+            if len(cal_data) <= 1:
+                return "❌ Нет данных в календаре занятий"
+            
+            # Группируем по ID абонемента
+            calendar_stats = {}
+            for i, row in enumerate(cal_data[1:], 2):
+                if len(row) > 6:
+                    sub_id = row[1] if len(row) > 1 else ''
+                    status = row[4] if len(row) > 4 else ''
+                    
+                    if sub_id and (not subscription_id or sub_id == subscription_id):
+                        if sub_id not in calendar_stats:
+                            calendar_stats[sub_id] = {'zaversheno': 0, 'zaplanirovanno': 0, 'propusk': 0}
+                        
+                        status_lower = status.lower()
+                        if status_lower == 'завершен':
+                            calendar_stats[sub_id]['zaversheno'] += 1
+                        elif status_lower == 'запланировано':
+                            calendar_stats[sub_id]['zaplanirovanno'] += 1
+                        elif status_lower == 'пропуск':
+                            calendar_stats[sub_id]['propusk'] += 1
+            
+            # Получаем данные из листа абонементов
+            subs_sheet = self.spreadsheet.worksheet("Абонементы")
+            subs_data = subs_sheet.get_all_values()
+            
+            if len(subs_data) <= 1:
+                return "❌ Нет данных в листе абонементов"
+            
+            # Проверяем и исправляем
+            fixed_count = 0
+            checked_count = 0
+            
+            for sub_id in calendar_stats:
+                cal_stats = calendar_stats[sub_id]
+                
+                # Ожидаемые значения
+                expected_h = cal_stats['zaversheno']
+                expected_i = cal_stats['zaplanirovanno']
+                expected_m = cal_stats['propusk']
+                
+                # Ищем абонемент в листе
+                for i, row in enumerate(subs_data[1:], 2):
+                    if len(row) > 1 and row[1] == sub_id:
+                        current_h = row[7] if len(row) > 7 else ''
+                        current_i = row[8] if len(row) > 8 else ''
+                        current_m = row[12] if len(row) > 12 else ''
+                        
+                        # Проверяем сходимость
+                        h_match = str(current_h) == str(expected_h)
+                        i_match = str(current_i) == str(expected_i)
+                        m_match = str(current_m) == str(expected_m)
+                        
+                        checked_count += 1
+                        
+                        # Проверяем статус абонемента (столбец J)
+                        current_status = row[9] if len(row) > 9 else ''  # J - Статус
+                        expected_status = 'Завершен' if expected_i == 0 else 'Активен'
+                        status_match = str(current_status).strip().lower() == expected_status.lower()
+                        
+                        if not (h_match and i_match and m_match and status_match):
+                            logging.info(f"🔄 Исправляю данные для {sub_id}:")
+                            logging.info(f"   H={current_h}→{expected_h}, I={current_i}→{expected_i}, M={current_m}→{expected_m}, J={current_status}→{expected_status}")
+                            
+                            # Исправляем данные
+                            if not h_match and len(row) > 7:
+                                subs_sheet.update_cell(i, 8, expected_h)  # H - столбец 8
+                            if not i_match and len(row) > 8:
+                                subs_sheet.update_cell(i, 9, expected_i)  # I - столбец 9
+                            if not m_match and len(row) > 12:
+                                subs_sheet.update_cell(i, 13, expected_m)  # M - столбец 13
+                            if not status_match and len(row) > 9:
+                                subs_sheet.update_cell(i, 10, expected_status)  # J - столбец 10
+                            
+                            fixed_count += 1
+                        break
+            
+            if fixed_count > 0:
+                logging.info(f"✅ Исправлено {fixed_count} из {checked_count} абонементов")
+                return f"✅ Исправлено {fixed_count} абонементов"
+            else:
+                logging.info(f"✅ Все {checked_count} абонементов имеют правильные данные")
+                return f"✅ Все данные корректны ({checked_count} абонементов)"
+                
+        except Exception as e:
+            logging.error(f"❌ Ошибка при проверке сходимости: {e}")
+            return f"❌ Ошибка: {e}"
 
 # Глобальный экземпляр сервиса
 try:

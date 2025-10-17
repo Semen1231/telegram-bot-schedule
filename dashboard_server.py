@@ -319,20 +319,20 @@ class DashboardDataService:
                     # Получаем данные из правильных столбцов
                     available_keys = list(sub.keys())
                     
-                    # Столбец E - Количество занятий (всего)
-                    total_lessons = 0
-                    if len(available_keys) > 4:
-                        total_lessons_value = sub.get(available_keys[4], 0)
-                        total_lessons = int(total_lessons_value) if total_lessons_value else 0
-                    
                     # Столбец H - Прошло занятий (количество посещенных занятий)
                     completed_lessons = 0
                     if len(available_keys) > 7:  # Индекс 7 = столбец H
                         completed_value = sub.get(available_keys[7], 0)
                         completed_lessons = int(completed_value) if completed_value else 0
                     
-                    # Вычисляем оставшиеся занятия
-                    remaining_lessons = total_lessons - completed_lessons
+                    # Столбец I - Осталось занятий (количество оставшихся занятий)
+                    remaining_lessons = 0
+                    if len(available_keys) > 8:  # Индекс 8 = столбец I
+                        remaining_value = sub.get(available_keys[8], 0)
+                        remaining_lessons = int(remaining_value) if remaining_value else 0
+                    
+                    # Вычисляем общее количество занятий: прошло + осталось
+                    total_lessons = completed_lessons + remaining_lessons
                     
                     # Процент выполнения: прошло / всего * 100
                     progress_percent = (completed_lessons / total_lessons * 100) if total_lessons > 0 else 0
@@ -383,6 +383,112 @@ class DashboardDataService:
             
         except Exception as e:
             logger.error(f"Ошибка получения прогресса абонементов: {e}")
+            return []
+    
+    def get_completed_subscription_progress(self, student_filter=None):
+        """Получает прогресс по завершенным абонементам с фильтрацией по студенту"""
+        try:
+            if not sheets_service:
+                return []
+            
+            # Получаем данные абонементов
+            subs_data = sheets_service.get_subscriptions_data()
+            if not subs_data:
+                return []
+            
+            # Фильтруем по статусу - только "Завершен" (столбец J)
+            completed_subs = []
+            for sub in subs_data:
+                # Получаем статус из столбца J (индекс 9)
+                keys = list(sub.keys())
+                status = sub.get(keys[9], '') if len(keys) > 9 else ''
+                
+                # Включаем только завершенные абонементы
+                if status == 'Завершен':
+                    completed_subs.append(sub)
+            
+            # Дополнительно фильтруем по студенту если указан
+            if student_filter and student_filter not in ['Все', 'ÐÑÐµ', 'Все', None, '']:
+                completed_subs = [
+                    sub for sub in completed_subs 
+                    if sub.get('Ребенок') == student_filter
+                ]
+            
+            progress_data = []
+            
+            for sub in completed_subs:
+                try:
+                    child_name = sub.get('Ребенок', 'Неизвестно')
+                    circle_name = sub.get('Кружок', 'Неизвестно')
+                    sub_id = sub.get('ID абонемента', '')
+                    
+                    # Получаем данные из правильных столбцов
+                    available_keys = list(sub.keys())
+                    
+                    # Столбец H - Прошло занятий (количество посещенных занятий)
+                    completed_lessons = 0
+                    if len(available_keys) > 7:  # Индекс 7 = столбец H
+                        completed_value = sub.get(available_keys[7], 0)
+                        completed_lessons = int(completed_value) if completed_value else 0
+                    
+                    # Столбец I - Осталось занятий (количество оставшихся занятий)
+                    remaining_lessons = 0
+                    if len(available_keys) > 8:  # Индекс 8 = столбец I
+                        remaining_value = sub.get(available_keys[8], 0)
+                        remaining_lessons = int(remaining_value) if remaining_value else 0
+                    
+                    # Вычисляем общее количество занятий: прошло + осталось
+                    total_lessons = completed_lessons + remaining_lessons
+                    
+                    # Процент выполнения: прошло / всего * 100
+                    progress_percent = (completed_lessons / total_lessons * 100) if total_lessons > 0 else 100
+                    
+                    # Получаем данные занятий из календаря для этого абонемента
+                    calendar_data = self.get_calendar_lessons_data()
+                    subscription_lessons = [
+                        lesson for lesson in calendar_data 
+                        if lesson.get('ID абонемента') == sub_id
+                    ]
+                    
+                    # Подсчитываем пропущенные занятия за весь период абонемента
+                    missed_total = len([
+                        lesson for lesson in subscription_lessons
+                        if lesson.get('Статус посещения') == 'Пропуск'
+                    ])
+                    
+                    progress_item = {
+                        'id': sub_id,
+                        'name': f"{circle_name} - {child_name}",
+                        'total_lessons': total_lessons,
+                        'completed_lessons': completed_lessons,
+                        'remaining_lessons': remaining_lessons,
+                        'progress_percent': round(progress_percent, 1),
+                        'missed_total': missed_total,
+                        'status': 'Завершен',
+                        'lessons': []
+                    }
+                    
+                    for lesson in subscription_lessons:
+                        lesson_detail = {
+                            'date': lesson.get('Дата занятия', ''),
+                            'start_time': lesson.get('Время начала', ''),
+                            'end_time': lesson.get('Время завершения', ''),
+                            'status': lesson.get('Статус посещения', ''),
+                            'attendance': lesson.get('Отметка', ''),
+                            'id': lesson.get('ID абонемента', '')
+                        }
+                        progress_item['lessons'].append(lesson_detail)
+                    
+                    progress_data.append(progress_item)
+                    
+                except (ValueError, TypeError) as e:
+                    logger.error(f"Ошибка обработки завершенного абонемента {sub.get('ID абонемента', 'unknown')}: {e}")
+                    continue
+            
+            return progress_data
+            
+        except Exception as e:
+            logger.error(f"Ошибка получения прогресса завершенных абонементов: {e}")
             return []
     
     def get_dashboard_metrics(self, student_filter='Все'):
@@ -448,8 +554,8 @@ class DashboardDataService:
             
             total_active = len(active_subs) if active_subs else 0
             total_lessons = sum(sub.get('total_lessons', 0) for sub in active_subs) if active_subs else 0
-            remaining_lessons = sum(sub.get('lessons_remaining', 0) for sub in active_subs) if active_subs else 0
-            completed_lessons = total_lessons - remaining_lessons
+            remaining_lessons = sum(sub.get('remaining_lessons', 0) for sub in active_subs) if active_subs else 0
+            completed_lessons = sum(sub.get('completed_lessons', 0) for sub in active_subs) if active_subs else 0
             
             return {
                 'total_active': total_active,
@@ -585,6 +691,28 @@ def api_subscriptions():
         
     except Exception as e:
         logger.error(f"❌ Ошибка API прогресса абонементов: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'timestamp': datetime.now().isoformat()
+        }), 500
+
+@app.route('/api/completed-subscriptions')
+def api_completed_subscriptions():
+    """API эндпоинт для получения прогресса по завершенным абонементам"""
+    try:
+        # Получаем фильтр из параметров запроса
+        student_filter = request.args.get('student', 'Все')
+        
+        progress_data = dashboard_service.get_completed_subscription_progress(student_filter)
+        return jsonify({
+            'success': True,
+            'completed_subscriptions': progress_data,
+            'timestamp': datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        logger.error(f"❌ Ошибка API прогресса завершенных абонементов: {e}")
         return jsonify({
             'success': False,
             'error': str(e),
@@ -827,6 +955,8 @@ if __name__ == '__main__':
     logger.info(f"📊 Дашборд доступен по адресу: http://{HOST}:{PORT}")
     logger.info(f"🔧 API эндпоинты:")
     logger.info(f"   • GET /api/metrics - получение метрик")
+    logger.info(f"   • GET /api/subscriptions - активные абонементы")
+    logger.info(f"   • GET /api/completed-subscriptions - завершенные абонементы")
     logger.info(f"   • GET /api/health - проверка здоровья")
     logger.info(f"   • GET /api/refresh - обновление данных")
     
