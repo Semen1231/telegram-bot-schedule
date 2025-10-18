@@ -331,8 +331,15 @@ class DashboardDataService:
                         remaining_value = sub.get(available_keys[8], 0)
                         remaining_lessons = int(remaining_value) if remaining_value else 0
                     
-                    # Вычисляем общее количество занятий: прошло + осталось
-                    total_lessons = completed_lessons + remaining_lessons
+                    # Столбец M - Пропущено занятий (индекс 12)
+                    missed_lessons = 0
+                    if len(available_keys) > 12:  # Индекс 12 = столбец M
+                        missed_value = sub.get(available_keys[12], 0)
+                        missed_lessons = int(missed_value) if missed_value else 0
+                    
+                    # Вычисляем общее количество занятий: прошло + осталось + пропущено
+                    # Серые блоки в прогрессивной шкале = осталось + пропущено
+                    total_lessons = completed_lessons + remaining_lessons + missed_lessons
                     
                     # Процент выполнения: прошло / всего * 100
                     progress_percent = (completed_lessons / total_lessons * 100) if total_lessons > 0 else 0
@@ -356,7 +363,7 @@ class DashboardDataService:
                         'name': f"{circle_name} - {child_name}",
                         'total_lessons': total_lessons,
                         'completed_lessons': completed_lessons,
-                        'remaining_lessons': remaining_lessons,
+                        'remaining_lessons': remaining_lessons + missed_lessons,  # Серые блоки = осталось + пропущено
                         'progress_percent': round(progress_percent, 1),
                         'missed_this_month': missed_this_month,
                         'lessons': []
@@ -437,8 +444,15 @@ class DashboardDataService:
                         remaining_value = sub.get(available_keys[8], 0)
                         remaining_lessons = int(remaining_value) if remaining_value else 0
                     
-                    # Вычисляем общее количество занятий: прошло + осталось
-                    total_lessons = completed_lessons + remaining_lessons
+                    # Столбец M - Пропущено занятий (индекс 12)
+                    missed_lessons = 0
+                    if len(available_keys) > 12:  # Индекс 12 = столбец M
+                        missed_value = sub.get(available_keys[12], 0)
+                        missed_lessons = int(missed_value) if missed_value else 0
+                    
+                    # Вычисляем общее количество занятий: прошло + осталось + пропущено
+                    # Серые блоки в прогрессивной шкале = осталось + пропущено
+                    total_lessons = completed_lessons + remaining_lessons + missed_lessons
                     
                     # Процент выполнения: прошло / всего * 100
                     progress_percent = (completed_lessons / total_lessons * 100) if total_lessons > 0 else 100
@@ -461,7 +475,7 @@ class DashboardDataService:
                         'name': f"{circle_name} - {child_name}",
                         'total_lessons': total_lessons,
                         'completed_lessons': completed_lessons,
-                        'remaining_lessons': remaining_lessons,
+                        'remaining_lessons': remaining_lessons + missed_lessons,  # Серые блоки = осталось + пропущено
                         'progress_percent': round(progress_percent, 1),
                         'missed_total': missed_total,
                         'status': 'Завершен',
