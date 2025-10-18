@@ -484,8 +484,8 @@ class Dashboard {
                     <div class="flex justify-between items-center mb-2">
                         <span class="font-bold text-white text-sm">${sub.title || sub.name}</span>
                         <div>
-                            <span class="text-sm text-gray-400">Прошло: ${completed} / ${total}</span>
-                            <span class="text-sm font-bold text-white ml-2">${Math.round(progressPercentage)}%</span>
+                            <span class="text-sm text-gray-400">Прошло: ${completed} / ${sub.display_total || total}</span>
+                            <span class="text-sm font-bold text-white ml-2">${sub.display_percent || Math.round(progressPercentage)}%</span>
                         </div>
                     </div>
                     <div class="progress-bar-container">
@@ -590,8 +590,8 @@ class Dashboard {
                         <span class="font-bold text-white text-sm">${sub.title || sub.name}</span>
                         <div class="flex items-center gap-2">
                             <span class="text-xs bg-green-600 text-white px-2 py-1 rounded">Завершен</span>
-                            <span class="text-sm text-gray-400">Прошло: ${completed} / ${total}</span>
-                            <span class="text-sm font-bold text-green-400 ml-2">${Math.round(progressPercentage)}%</span>
+                            <span class="text-sm text-gray-400">Прошло: ${completed} / ${sub.display_total || total}</span>
+                            <span class="text-sm font-bold text-green-400 ml-2">${sub.display_percent || Math.round(progressPercentage)}%</span>
                         </div>
                     </div>
                     <div class="progress-bar-container">

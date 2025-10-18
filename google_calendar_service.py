@@ -80,6 +80,59 @@ class GoogleCalendarService:
             logging.error(f"❌ Ошибка при поиске события по ID {lesson_id}: {e}")
             return None
 
+    def find_event_by_lesson_details(self, lesson_data, circle_name):
+        """Находит событие по деталям занятия (дата, время, ребенок, кружок)."""
+        try:
+            events = self.get_all_events()
+            
+            target_date = lesson_data.get('date', '')
+            target_start_time = lesson_data.get('start_time', '')
+            target_child = lesson_data.get('child', '')
+            
+            # Парсим целевую дату для сравнения
+            if not target_date or not target_start_time or not target_child:
+                return None
+                
+            try:
+                from datetime import datetime
+                target_datetime = datetime.strptime(f"{target_date} {target_start_time}", '%d.%m.%Y %H:%M')
+            except ValueError:
+                logging.warning(f"⚠️ Не удалось парсить дату/время: {target_date} {target_start_time}")
+                return None
+            
+            for event in events:
+                try:
+                    # Проверяем название события (должно содержать имя ребенка и кружок)
+                    summary = event.get('summary', '')
+                    if target_child not in summary or circle_name not in summary:
+                        continue
+                    
+                    # Проверяем время начала события
+                    start = event.get('start', {})
+                    event_datetime_str = start.get('dateTime', '')
+                    
+                    if event_datetime_str:
+                        # Парсим время события
+                        event_datetime = datetime.fromisoformat(event_datetime_str.replace('Z', '+00:00'))
+                        
+                        # Сравниваем дату и время (игнорируем часовой пояс)
+                        if (event_datetime.date() == target_datetime.date() and
+                            event_datetime.hour == target_datetime.hour and
+                            event_datetime.minute == target_datetime.minute):
+                            
+                            logging.info(f"🎯 Найдено событие по деталям: {summary} на {target_date} {target_start_time}")
+                            return event
+                            
+                except Exception as e:
+                    logging.warning(f"⚠️ Ошибка при проверке события {event.get('id', 'unknown')}: {e}")
+                    continue
+            
+            return None
+            
+        except Exception as e:
+            logging.error(f"❌ Ошибка при поиске события по деталям: {e}")
+            return None
+
     def get_status_emoji(self, mark):
         """Возвращает эмодзи в зависимости от отметки посещения."""
         mark = str(mark).strip()
@@ -92,6 +145,74 @@ class GoogleCalendarService:
         }
         
         return emoji_map.get(mark, '📅')  # По умолчанию календарь, если статус не определен
+
+    def remove_duplicate_events(self, child_name, circle_name, target_date, target_start_time):
+        """Удаляет дублирующиеся события для одного занятия."""
+        try:
+            events = self.get_all_events()
+            matching_events = []
+            
+            # Парсим целевую дату для сравнения
+            try:
+                from datetime import datetime
+                target_datetime = datetime.strptime(f"{target_date} {target_start_time}", '%d.%m.%Y %H:%M')
+            except ValueError:
+                logging.warning(f"⚠️ Не удалось парсить дату/время для удаления дублей: {target_date} {target_start_time}")
+                return 0
+            
+            # Находим все события, которые соответствуют критериям
+            for event in events:
+                try:
+                    summary = event.get('summary', '')
+                    
+                    # Проверяем название события (должно содержать имя ребенка и кружок)
+                    if child_name in summary and circle_name in summary:
+                        # Проверяем время начала события
+                        start = event.get('start', {})
+                        event_datetime_str = start.get('dateTime', '')
+                        
+                        if event_datetime_str:
+                            # Парсим время события
+                            event_datetime = datetime.fromisoformat(event_datetime_str.replace('Z', '+00:00'))
+                            
+                            # Сравниваем дату и время
+                            if (event_datetime.date() == target_datetime.date() and
+                                event_datetime.hour == target_datetime.hour and
+                                event_datetime.minute == target_datetime.minute):
+                                
+                                matching_events.append(event)
+                                
+                except Exception as e:
+                    logging.warning(f"⚠️ Ошибка при проверке события для удаления дублей: {e}")
+                    continue
+            
+            # Если найдено больше одного события - удаляем дубли
+            if len(matching_events) > 1:
+                logging.info(f"🔍 Найдено {len(matching_events)} дублирующихся событий для {child_name} - {circle_name} на {target_date} {target_start_time}")
+                
+                # Сортируем по времени создания (оставляем самое новое)
+                matching_events.sort(key=lambda x: x.get('created', ''), reverse=True)
+                
+                # Удаляем все кроме первого (самого нового)
+                deleted_count = 0
+                for duplicate_event in matching_events[1:]:
+                    try:
+                        self.service.events().delete(
+                            calendarId=self.calendar_id,
+                            eventId=duplicate_event['id']
+                        ).execute()
+                        deleted_count += 1
+                        logging.info(f"✅ Удален дубль события: {duplicate_event.get('summary', 'Без названия')}")
+                    except Exception as e:
+                        logging.error(f"❌ Ошибка при удалении дубля события {duplicate_event.get('id', 'unknown')}: {e}")
+                
+                return deleted_count
+            
+            return 0
+            
+        except Exception as e:
+            logging.error(f"❌ Ошибка при удалении дублей событий: {e}")
+            return 0
 
     def create_event(self, lesson_data, circle_name):
         """Создает новое событие в календаре с повторными попытками."""
@@ -458,6 +579,55 @@ ID абонемента: {lesson_data['subscription_id']}
             
         except Exception as e:
             logging.error(f"❌ Ошибка при поиске события прогноза по ID {forecast_id}: {e}")
+            return None
+
+    def find_forecast_event_by_details(self, forecast_data):
+        """Находит событие прогноза по деталям (дата, ребенок, кружок)."""
+        try:
+            events = self.get_all_events()
+            
+            target_date = forecast_data.get('payment_date', '')
+            target_child = forecast_data.get('child', '')
+            target_circle = forecast_data.get('circle', '')
+            
+            # Парсим целевую дату для сравнения
+            if not target_date or not target_child or not target_circle:
+                return None
+                
+            try:
+                from datetime import datetime
+                target_datetime = datetime.strptime(target_date, '%d.%m.%Y')
+            except ValueError:
+                logging.warning(f"⚠️ Не удалось парсить дату прогноза: {target_date}")
+                return None
+            
+            for event in events:
+                try:
+                    # Проверяем название события (должно содержать "Оплата", имя ребенка и кружок)
+                    summary = event.get('summary', '')
+                    if ("Оплата" in summary and target_child in summary and target_circle in summary):
+                        
+                        # Проверяем дату события (для событий на весь день)
+                        start = event.get('start', {})
+                        event_date_str = start.get('date', '')
+                        
+                        if event_date_str:
+                            # Парсим дату события
+                            event_date = datetime.strptime(event_date_str, '%Y-%m-%d')
+                            
+                            # Сравниваем даты
+                            if event_date.date() == target_datetime.date():
+                                logging.info(f"🎯 Найдено событие прогноза по деталям: {summary} на {target_date}")
+                                return event
+                                
+                except Exception as e:
+                    logging.warning(f"⚠️ Ошибка при проверке события прогноза {event.get('id', 'unknown')}: {e}")
+                    continue
+            
+            return None
+            
+        except Exception as e:
+            logging.error(f"❌ Ошибка при поиске события прогноза по деталям: {e}")
             return None
 
     def create_forecast_event(self, forecast_data):

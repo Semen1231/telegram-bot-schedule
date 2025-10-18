@@ -970,8 +970,17 @@ async def forecast_menu_handler(update: Update, context: ContextTypes.DEFAULT_TY
             total_paid_all += month_data['total_paid']
             
             message_text += f"📅 <b>{month_data['name']}</b>\n"
-            message_text += f"💰 Запланировано: <b>{month_data['total_planned']:.0f} руб.</b>\n"
-            message_text += f"✅ Оплачено: <b>{month_data['total_paid']:.0f} руб.</b>\n\n"
+            
+            # Всего запланировано = запланировано + оплачено
+            month_total_planned = month_data['total_planned'] + month_data['total_paid']
+            message_text += f"💰 Всего запланировано: <b>{month_total_planned:.0f} руб.</b>\n"
+            message_text += f"✅ Всего оплачено: <b>{month_data['total_paid']:.0f} руб.</b>\n"
+            
+            # Осталось оплатить = только запланированная сумма (без уже оплаченного)
+            month_remaining = month_data['total_planned']
+            if month_remaining > 0:
+                message_text += f"⏳ Осталось оплатить: <b>{month_remaining:.0f} руб.</b>\n"
+            message_text += "\n"
             
             # Показываем недели с данными
             weeks_with_data = []
@@ -3451,29 +3460,43 @@ async def select_subscription_handler(update: Update, context: ContextTypes.DEFA
         message_text += f"🆔 <b>ID:</b> <code>{sub_id}</code>\n"
         message_text += f"👤 <b>Ребенок:</b> {sub_info.get('Ребенок', 'N/A')}\n"
         message_text += f"🎨 <b>Кружок:</b> {sub_info.get('Кружок', 'N/A')}\n"
-        # Определяем дату окончания: сравниваем столбец G и L
-        logging.info(f"🔍 Доступные ключи в sub_info: {list(sub_info.keys())}")
-        end_date_g = sub_info.get('Дата окончания', '')  # Столбец G
-        end_date_l = sub_info.get('Дата последнего занятия', '')  # Столбец L
-        logging.info(f"🔍 Дата окончания G: '{end_date_g}', Дата последнего занятия L: '{end_date_l}'")
         
-        # Логика выбора даты окончания
-        if end_date_g and end_date_l:
-            try:
-                from datetime import datetime
-                date_g = datetime.strptime(end_date_g, '%d.%m.%Y')
-                date_l = datetime.strptime(end_date_l, '%d.%m.%Y')
-                end_date = end_date_l if date_l >= date_g else end_date_g
-            except ValueError:
-                end_date = end_date_g or end_date_l or 'N/A'
-        else:
-            end_date = end_date_g or end_date_l or 'N/A'
+        # Определяем максимальную дату из календаря занятий (столбец C)
+        max_date = 'N/A'
+        if lessons:
+            lesson_dates = []
+            for lesson in lessons:
+                lesson_date = lesson.get('Дата занятия', '')
+                if lesson_date:
+                    try:
+                        from datetime import datetime
+                        parsed_date = datetime.strptime(lesson_date, '%d.%m.%Y')
+                        lesson_dates.append(parsed_date)
+                    except ValueError:
+                        continue
+            
+            if lesson_dates:
+                max_date_obj = max(lesson_dates)
+                max_date = max_date_obj.strftime('%d.%m.%Y')
         
-        message_text += f"📅 <b>Период:</b> {sub_info.get('Дата начала', 'N/A')} - {end_date}\n"
-        message_text += f"📊 <b>Статус:</b> {sub_info.get('Статус', 'N/A')}\n"
+        message_text += f"📅 <b>Период:</b> {sub_info.get('Дата начала', 'N/A')} - {max_date}\n"
+        
+        # Получаем данные из правильных столбцов листа Абонементы
+        available_keys = list(sub_info.keys())
+        
+        # Статус из столбца J (индекс 9)
+        status = sub_info.get(available_keys[9], 'N/A') if len(available_keys) > 9 else 'N/A'
+        message_text += f"📊 <b>Статус:</b> {status}\n"
+        
         message_text += f"💰 <b>Стоимость:</b> {sub_info.get('Стоимость', 'N/A')} руб.\n"
-        message_text += f"📚 <b>Всего занятий:</b> {sub_info.get('К-во занятий', 'N/A')}\n"
-        message_text += f"📉 <b>Осталось:</b> {sub_info.get('Осталось занятий', 'N/A')}\n"
+        
+        # Всего занятий из столбца E (индекс 4)
+        total_lessons = sub_info.get(available_keys[4], 'N/A') if len(available_keys) > 4 else 'N/A'
+        message_text += f"📚 <b>Всего занятий:</b> {total_lessons}\n"
+        
+        # Осталось из столбца I (индекс 8)
+        remaining_lessons = sub_info.get(available_keys[8], 'N/A') if len(available_keys) > 8 else 'N/A'
+        message_text += f"📉 <b>Осталось:</b> {remaining_lessons}\n"
         message_text += f"💳 <b>Тип оплаты:</b> {sub_info.get('Оплата', 'N/A')}\n\n"
         
         # Расписание
@@ -3488,20 +3511,25 @@ async def select_subscription_handler(update: Update, context: ContextTypes.DEFA
         
         # Статистика занятий
         message_text += f"\n📋 <b>ЗАНЯТИЯ ({len(lessons)} записей):</b>\n"
+        
+        # Посещено из столбца H (индекс 7)
+        attended = int(sub_info.get(available_keys[7], 0) or 0) if len(available_keys) > 7 else 0
+        
+        # Пропущено из столбца M (индекс 12)
+        missed = int(sub_info.get(available_keys[12], 0) or 0) if len(available_keys) > 12 else 0
+        
+        # Запланировано - считаем из календаря занятий со статусом "Запланировано"
+        planned = 0
         if lessons:
-            attended = sum(1 for l in lessons if l.get('Отметка', '') in ['✔️', 'Присутствовал'])
-            missed = sum(1 for l in lessons if l.get('Отметка', '') in ['✖️', 'Отсутствовал'])
-            planned = sum(1 for l in lessons if l.get('Отметка', '') == '')
-            
-            message_text += f"• ✅ Посещено: {attended}\n"
-            message_text += f"• ❌ Пропущено: {missed}\n"
-            message_text += f"• 📅 Запланировано: {planned}\n"
-            
-            if attended + missed > 0:
-                attendance_rate = round((attended / (attended + missed)) * 100, 1)
-                message_text += f"• 📊 Посещаемость: {attendance_rate}%\n"
-        else:
-            message_text += "• Занятия не найдены\n"
+            planned = sum(1 for l in lessons if l.get('Статус посещения', '') == 'Запланировано')
+        
+        message_text += f"• ✅ Посещено: {attended}\n"
+        message_text += f"• ❌ Пропущено: {missed}\n"
+        message_text += f"• 📅 Запланировано: {planned}\n"
+        
+        if attended + missed > 0:
+            attendance_rate = round((attended / (attended + missed)) * 100, 1)
+            message_text += f"• 📊 Посещаемость: {attendance_rate}%\n"
         
         # Прогноз оплат
         message_text += f"\n💰 <b>ПРОГНОЗ ОПЛАТ ({len(forecasts)} записей):</b>\n"

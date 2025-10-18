@@ -3109,16 +3109,27 @@ class GoogleSheetsService:
                 try:
                     # Формируем данные для создания события в формате, который ожидает create_event
                     lesson_data = {
+                        'lesson_id': str(next_id),  # Добавляем ID занятия
+                        'subscription_id': subscription_id,  # Добавляем ID абонемента
                         'child': child_name,
                         'date': lesson_date.strftime('%d.%m.%Y'),
                         'start_time': start_time,
                         'end_time': end_time,
+                        'status': 'Запланировано',  # Статус для нового занятия
                         'mark': ''  # Пустая отметка для нового занятия
                     }
                     
-                    event_created = self.calendar_service.create_event(lesson_data, circle_name)
-                    if event_created:
-                        logging.info(f"✅ Создано событие в Google Calendar для замещающего занятия")
+                    # Сначала проверяем, нет ли уже события для этого занятия
+                    existing_event = self.calendar_service.find_event_by_lesson_id(str(next_id))
+                    if not existing_event:
+                        existing_event = self.calendar_service.find_event_by_lesson_details(lesson_data, circle_name)
+                    
+                    if existing_event:
+                        logging.info(f"⚠️ Событие для замещающего занятия уже существует, пропускаю создание")
+                    else:
+                        event_created = self.calendar_service.create_event(lesson_data, circle_name)
+                        if event_created:
+                            logging.info(f"✅ Создано событие в Google Calendar для замещающего занятия с ID {next_id}")
                 except Exception as calendar_error:
                     logging.warning(f"⚠️ Не удалось создать событие в Google Calendar: {calendar_error}")
             
@@ -4958,7 +4969,17 @@ class GoogleSheetsService:
                     circle_name = circle_names_map.get(lesson_data['subscription_id'], 'Неизвестный кружок')
                     
                     # Ищем событие в Google Calendar по ID занятия
-                    existing_event = self.calendar_service.find_event_by_lesson_id(lesson_data['lesson_id'])
+                    existing_event = None
+                    
+                    # Сначала пробуем найти по ID занятия (если ID не пустой и не N/A)
+                    if lesson_data['lesson_id'] and lesson_data['lesson_id'] not in ['', 'N/A']:
+                        existing_event = self.calendar_service.find_event_by_lesson_id(lesson_data['lesson_id'])
+                    
+                    # Если не найдено по ID, ищем по деталям (дата, время, ребенок, кружок)
+                    if not existing_event:
+                        existing_event = self.calendar_service.find_event_by_lesson_details(lesson_data, circle_name)
+                        if existing_event:
+                            logging.info(f"🔍 Найдено событие по деталям для занятия {lesson_data['lesson_id']}")
                     
                     if existing_event:
                         # Событие существует - сравниваем переменные
@@ -5137,7 +5158,16 @@ class GoogleSheetsService:
                     logging.info(f"💰 Обрабатываю прогноз: {forecast_data_item['child']} - {forecast_data_item['circle']} на {forecast_data_item['payment_date']} (ID: {forecast_data_item['forecast_id']})")
                     
                     # Ищем существующее событие по ID прогноза
+                    existing_event = None
+                    
+                    # Сначала пробуем найти по ID прогноза
                     existing_event = self.calendar_service.find_forecast_event_by_id(forecast_data_item['forecast_id'])
+                    
+                    # Если не найдено по ID, ищем по деталям (дата, ребенок, кружок)
+                    if not existing_event:
+                        existing_event = self.calendar_service.find_forecast_event_by_details(forecast_data_item)
+                        if existing_event:
+                            logging.info(f"🔍 Найдено событие прогноза по деталям для {forecast_data_item['child']} - {forecast_data_item['circle']}")
                     
                     if existing_event:
                         # Событие найдено - сравниваем данные
