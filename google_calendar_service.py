@@ -190,12 +190,49 @@ class GoogleCalendarService:
             if len(matching_events) > 1:
                 logging.info(f"🔍 Найдено {len(matching_events)} дублирующихся событий для {child_name} - {circle_name} на {target_date} {target_start_time}")
                 
-                # Сортируем по времени создания (оставляем самое новое)
-                matching_events.sort(key=lambda x: x.get('created', ''), reverse=True)
+                # Выбираем самое актуальное событие для сохранения
+                # Приоритет: 1) с непустой отметкой, 2) последнее по времени обновления
+                best_event = None
+                best_priority = -1
                 
-                # Удаляем все кроме первого (самого нового)
+                for event in matching_events:
+                    description = event.get('description', '')
+                    mark = ''
+                    
+                    # Извлекаем отметку из описания
+                    for line in description.split('\n'):
+                        if line.startswith('Отметка:'):
+                            mark = line.split(':', 1)[1].strip()
+                            break
+                    
+                    # Определяем приоритет события
+                    priority = 0
+                    if mark and mark not in ['', 'N/A']:
+                        priority = 2  # Высокий приоритет для событий с отметкой
+                    else:
+                        priority = 1  # Низкий приоритет для событий без отметки
+                    
+                    # Если приоритет выше или равен, проверяем время обновления
+                    if priority > best_priority:
+                        best_event = event
+                        best_priority = priority
+                    elif priority == best_priority:
+                        # Если приоритет одинаковый, выбираем последнее обновленное
+                        if best_event:
+                            best_updated = best_event.get('updated', '')
+                            current_updated = event.get('updated', '')
+                            if current_updated > best_updated:
+                                best_event = event
+                        else:
+                            best_event = event
+                
+                logging.info(f"✅ Выбрано для сохранения: {best_event.get('summary', 'Без названия')} (приоритет: {best_priority})")
+                
+                # Удаляем все события кроме лучшего
+                events_to_delete = [e for e in matching_events if e['id'] != best_event['id']]
+                
                 deleted_count = 0
-                for duplicate_event in matching_events[1:]:
+                for duplicate_event in events_to_delete:
                     try:
                         self.service.events().delete(
                             calendarId=self.calendar_id,
@@ -943,8 +980,46 @@ ID абонемента: {lesson_data['subscription_id']}
                 if len(events_list) > 1:
                     logging.info(f"🔍 Найдено {len(events_list)} дублей для занятия ID {lesson_id}")
                     
-                    # Оставляем первое событие, удаляем остальные
-                    events_to_delete = events_list[1:]  # Все кроме первого
+                    # Выбираем самое актуальное событие для сохранения
+                    # Приоритет: 1) с непустой отметкой, 2) последнее по времени обновления
+                    best_event = None
+                    best_priority = -1
+                    
+                    for event in events_list:
+                        description = event.get('description', '')
+                        mark = ''
+                        
+                        # Извлекаем отметку из описания
+                        for line in description.split('\n'):
+                            if line.startswith('Отметка:'):
+                                mark = line.split(':', 1)[1].strip()
+                                break
+                        
+                        # Определяем приоритет события
+                        priority = 0
+                        if mark and mark not in ['', 'N/A']:
+                            priority = 2  # Высокий приоритет для событий с отметкой
+                        else:
+                            priority = 1  # Низкий приоритет для событий без отметки
+                        
+                        # Если приоритет выше или равен, проверяем время обновления
+                        if priority > best_priority:
+                            best_event = event
+                            best_priority = priority
+                        elif priority == best_priority:
+                            # Если приоритет одинаковый, выбираем последнее обновленное
+                            if best_event:
+                                best_updated = best_event.get('updated', '')
+                                current_updated = event.get('updated', '')
+                                if current_updated > best_updated:
+                                    best_event = event
+                            else:
+                                best_event = event
+                    
+                    logging.info(f"✅ Выбрано для сохранения: {best_event.get('summary', 'Без названия')} (приоритет: {best_priority})")
+                    
+                    # Удаляем все события кроме лучшего
+                    events_to_delete = [e for e in events_list if e['id'] != best_event['id']]
                     
                     for event in events_to_delete:
                         try:

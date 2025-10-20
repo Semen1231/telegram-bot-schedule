@@ -2660,8 +2660,9 @@ class GoogleSheetsService:
                         # Для отметки "Посещение" просто обновляем без выбора переноса
                         logging.info(f"🎯 Разовый абонемент {subscription_id} - отметка '{mark}' без выбора переноса")
             
-            # Проверяем, нужно ли создать новое занятие при отмене, переносе или пропуске по вине (для обычных абонементов)
-            if mark.lower() in ['пропуск (по вине)', 'отмена (болезнь)', 'отмена (другое)', 'перенос']:
+            # Проверяем, нужно ли создать новое занятие при отмене или переносе (для обычных абонементов)
+            # ВАЖНО: "Пропуск (по вине)" НЕ создает замещающее занятие!
+            if mark.lower() in ['отмена (болезнь)', 'отмена (другое)', 'перенос']:
                 # Проверяем тип абонемента (если не разовый)
                 if subscription_info and subscription_info.get('subscription_type', '').lower() != 'разовый':
                     logging.info(f"Обнаружена отмена/перенос занятия {lesson_id}, создаю замещающее занятие...")
@@ -2674,6 +2675,9 @@ class GoogleSheetsService:
                         logging.warning(f"⚠️ Не удалось создать замещающее занятие для абонемента {subscription_id}")
                 elif not subscription_info:
                     logging.warning(f"⚠️ Не удалось получить информацию об абонементе {subscription_id}")
+            elif mark.lower() == 'пропуск (по вине)':
+                # Для "Пропуск (по вине)" только обновляем статистику без создания замещающего занятия
+                logging.info(f"🚫 Пропуск (по вине) для занятия {lesson_id} - замещающее занятие НЕ создается")
             
             # Столбец I (Осталось занятий) будет автоматически пересчитан в update_subscription_stats()
             # на основе количества занятий со статусом "Запланировано"
@@ -3402,25 +3406,32 @@ class GoogleSheetsService:
             planned_payments = []
             
             for row_index, row in enumerate(all_data[1:], start=2):
-                if len(row) >= 5:
+                if len(row) >= 4:  # Нужно минимум 4 столбца (A, B, C, D)
                     circle_name = str(row[0]).strip()      # A: Кружок
                     child_name = str(row[1]).strip()       # B: Ребенок
                     payment_date = str(row[2]).strip()     # C: Дата оплаты
                     budget = str(row[3]).strip()           # D: Бюджет
-                    status = str(row[4]).strip()           # E: Статус
+                    status = str(row[4]).strip() if len(row) >= 5 else ''  # E: Статус (опционально)
                     
-                    if (circle_name and child_name and payment_date and 
-                        status == "Оплата запланирована"):
-                        
-                        planned_payments.append({
-                            'row_index': row_index,
-                            'circle_name': circle_name,
-                            'child_name': child_name,
-                            'payment_date': payment_date,
-                            'budget': budget,
-                            'status': status,
-                            'key': f"{child_name}|{circle_name}"
-                        })
+                    # Убрана фильтрация по статусу - считаем ВСЕ строки с датами
+                    if (circle_name and child_name and payment_date and budget):
+                        try:
+                            # Очищаем строку от неразрывных пробелов и других символов
+                            budget_clean = budget.replace('\xa0', '').replace(' ', '').replace(',', '.').strip()
+                            # Проверяем что budget это число
+                            budget_value = float(budget_clean) if budget_clean else 0
+                            if budget_value > 0:
+                                planned_payments.append({
+                                    'row_index': row_index,
+                                    'circle_name': circle_name,
+                                    'child_name': child_name,
+                                    'payment_date': payment_date,
+                                    'budget': budget_clean,  # Сохраняем очищенную строку
+                                    'status': status,
+                                    'key': f"{child_name}|{circle_name}"
+                                })
+                        except (ValueError, AttributeError):
+                            continue  # Пропускаем строки с некорректным бюджетом
             
             logging.info(f"Найдено {len(planned_payments)} запланированных оплат")
             return planned_payments
@@ -3445,25 +3456,32 @@ class GoogleSheetsService:
             paid_payments = []
             
             for row_index, row in enumerate(all_data[1:], start=2):
-                if len(row) >= 5:
+                if len(row) >= 4:  # Нужно минимум 4 столбца (A, B, C, D)
                     circle_name = str(row[0]).strip()      # A: Кружок
                     child_name = str(row[1]).strip()       # B: Ребенок
                     payment_date = str(row[2]).strip()     # C: Дата оплаты
-                    amount = str(row[3]).strip()           # D: Сумма
-                    status = str(row[4]).strip()           # E: Статус
+                    amount = str(row[3]).strip()           # D: Бюджет/Сумма
+                    status = str(row[4]).strip() if len(row) >= 5 else ''  # E: Статус (опционально)
                     
-                    if (circle_name and child_name and payment_date and 
-                        status == "Оплачено"):
-                        
-                        paid_payments.append({
-                            'row_index': row_index,
-                            'circle_name': circle_name,
-                            'child_name': child_name,
-                            'payment_date': payment_date,
-                            'amount': amount,
-                            'status': status,
-                            'key': f"{child_name}|{circle_name}"
-                        })
+                    # Убрана фильтрация по статусу - считаем ВСЕ строки с датами
+                    if (circle_name and child_name and payment_date and amount):
+                        try:
+                            # Очищаем строку от неразрывных пробелов и других символов
+                            amount_clean = amount.replace('\xa0', '').replace(' ', '').replace(',', '.').strip()
+                            # Проверяем что amount это число
+                            amount_value = float(amount_clean) if amount_clean else 0
+                            if amount_value > 0:
+                                paid_payments.append({
+                                    'row_index': row_index,
+                                    'circle_name': circle_name,
+                                    'child_name': child_name,
+                                    'payment_date': payment_date,
+                                    'amount': amount_clean,  # Сохраняем очищенную строку
+                                    'status': status,
+                                    'key': f"{child_name}|{circle_name}"
+                                })
+                        except (ValueError, AttributeError):
+                            continue  # Пропускаем строки с некорректной суммой
             
             logging.info(f"Найдено {len(paid_payments)} оплаченных платежей")
             return paid_payments
@@ -3991,11 +4009,48 @@ class GoogleSheetsService:
                 if len(events) > 1:
                     logging.info(f"Найдены дубли для ключа '{event_key}': {len(events)} событий")
                     
-                    # Сортируем события по дате создания (оставляем самое старое)
-                    events.sort(key=lambda x: x.get('created', ''))
+                    # Выбираем самое актуальное событие для сохранения
+                    # Приоритет: 1) с непустой отметкой, 2) последнее по времени обновления
+                    best_event = None
+                    best_priority = -1
                     
-                    # Удаляем все события кроме первого (самого старого)
-                    for duplicate_event in events[1:]:
+                    for event in events:
+                        description = event.get('description', '')
+                        mark = ''
+                        
+                        # Извлекаем отметку из описания
+                        for line in description.split('\n'):
+                            if line.startswith('Отметка:'):
+                                mark = line.split(':', 1)[1].strip()
+                                break
+                        
+                        # Определяем приоритет события
+                        priority = 0
+                        if mark and mark not in ['', 'N/A']:
+                            priority = 2  # Высокий приоритет для событий с отметкой
+                        else:
+                            priority = 1  # Низкий приоритет для событий без отметки
+                        
+                        # Если приоритет выше или равен, проверяем время обновления
+                        if priority > best_priority:
+                            best_event = event
+                            best_priority = priority
+                        elif priority == best_priority:
+                            # Если приоритет одинаковый, выбираем последнее обновленное
+                            if best_event:
+                                best_updated = best_event.get('updated', '')
+                                current_updated = event.get('updated', '')
+                                if current_updated > best_updated:
+                                    best_event = event
+                            else:
+                                best_event = event
+                    
+                    logging.info(f"✅ Выбрано для сохранения: {best_event.get('summary', 'Без названия')} (приоритет: {best_priority})")
+                    
+                    # Удаляем все события кроме лучшего
+                    events_to_delete = [e for e in events if e['id'] != best_event['id']]
+                    
+                    for duplicate_event in events_to_delete:
                         try:
                             self.calendar_service.events().delete(
                                 calendarId=config.GOOGLE_CALENDAR_ID,
@@ -4008,8 +4063,8 @@ class GoogleSheetsService:
                             
                             # Удаляем из словаря existing_events
                             if event_key in existing_events and existing_events[event_key]['id'] == duplicate_event['id']:
-                                # Если это был основной элемент в словаре, заменяем его на первый
-                                existing_events[event_key] = events[0]
+                                # Если это был основной элемент в словаре, заменяем его на лучшее (с отметкой)
+                                existing_events[event_key] = best_event
                             
                         except HttpError as e:
                             if e.resp.status == 403:
@@ -6332,16 +6387,57 @@ class GoogleSheetsService:
                     content_groups[content_key] = []
                 content_groups[content_key].append((event_key, event))
             
-            # Удаляем дубли (оставляем только самое старое)
-            for content_key, events in content_groups.items():
-                if len(events) > 1:
-                    logging.info(f"Найдены дубли по содержимому '{content_key}': {len(events)} событий")
+            # Удаляем дубли (оставляем самое актуальное - с отметкой)
+            for content_key, events_list in content_groups.items():
+                if len(events_list) > 1:
+                    logging.info(f"Найдены дубли по содержимому '{content_key}': {len(events_list)} событий")
                     
-                    # Сортируем по дате создания
-                    events.sort(key=lambda x: x[1].get('created', ''))
+                    # Выбираем самое актуальное событие для сохранения
+                    # Приоритет: 1) с непустой отметкой, 2) последнее по времени обновления
+                    best_event = None
+                    best_event_key = None
+                    best_priority = -1
                     
-                    # Удаляем все кроме первого (самого старого)
-                    for event_key, event in events[1:]:
+                    for event_key, event in events_list:
+                        description = event.get('description', '')
+                        mark = ''
+                        
+                        # Извлекаем отметку из описания
+                        for line in description.split('\n'):
+                            if line.startswith('Отметка:'):
+                                mark = line.split(':', 1)[1].strip()
+                                break
+                        
+                        # Определяем приоритет события
+                        priority = 0
+                        if mark and mark not in ['', 'N/A']:
+                            priority = 2  # Высокий приоритет для событий с отметкой
+                        else:
+                            priority = 1  # Низкий приоритет для событий без отметки
+                        
+                        # Если приоритет выше или равен, проверяем время обновления
+                        if priority > best_priority:
+                            best_event = event
+                            best_event_key = event_key
+                            best_priority = priority
+                        elif priority == best_priority:
+                            # Если приоритет одинаковый, выбираем последнее обновленное
+                            if best_event:
+                                best_updated = best_event.get('updated', '')
+                                current_updated = event.get('updated', '')
+                                if current_updated > best_updated:
+                                    best_event = event
+                                    best_event_key = event_key
+                            else:
+                                best_event = event
+                                best_event_key = event_key
+                    
+                    logging.info(f"✅ Выбрано для сохранения: {best_event.get('summary', 'Без названия')} (приоритет: {best_priority})")
+                    
+                    # Удаляем все кроме лучшего
+                    for event_key, event in events_list:
+                        if event_key == best_event_key:
+                            continue  # Пропускаем лучшее событие
                         try:
                             self.calendar_service.events().delete(
                                 calendarId=config.GOOGLE_CALENDAR_ID,
@@ -7147,7 +7243,8 @@ class GoogleSheetsService:
             logging.info("🔄 Начинаю получение еженедельной сводки...")
             
             # Определяем текущую неделю (понедельник - воскресенье)
-            today = datetime.now()
+            # ВАЖНО: Обнуляем время для корректного сравнения дат
+            today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
             monday = today - timedelta(days=today.weekday())
             sunday = monday + timedelta(days=6)
             
@@ -7251,24 +7348,26 @@ class GoogleSheetsService:
             attended = sum(1 for l in summary['lessons_this_week'] 
                           if l['mark'].lower() == 'посещение')
             
-            # 📅 Запланировано: ВСЕ занятия за период (все статусы в столбце E)
-            planned = total_lessons  # Все занятия за выбранный период
-            
             # ❌ Пропущено: столбец G со значениями "Пропуск (по вине)", "Отмена (болезнь)", "Перенос"
             missed_marks = ['пропуск (по вине)', 'отмена (болезнь)', 'перенос']
             missed = sum(1 for l in summary['lessons_this_week'] 
                         if l['mark'].lower() in missed_marks)
             
-            # 📊 Посещаемость: Посещено / Запланировано * 100%
-            # Показывает процент посещенных занятий от всех запланированных
-            attendance_rate = round((attended / max(planned, 1)) * 100, 1) if planned > 0 else 0
+            # 📅 Запланировано: столбец E со значением "Запланировано"
+            planned = sum(1 for l in summary['lessons_this_week'] 
+                         if l['status'].lower() == 'запланировано')
             
-            logging.info(f"📊 Статистика посещаемости (новая логика):")
-            logging.info(f"  • Всего занятий: {total_lessons}")
+            # 📊 Посещаемость: Посещено / (Посещено + Пропущено) * 100%
+            # Показывает процент посещенных занятий от фактически проведенных (посещено + пропущено)
+            total_actual = attended + missed  # Фактически проведенные занятия
+            attendance_rate = round((attended / max(total_actual, 1)) * 100, 1) if total_actual > 0 else 0
+            
+            logging.info(f"📊 Статистика посещаемости (исправленная логика):")
+            logging.info(f"  • Всего занятий за период: {total_lessons}")
             logging.info(f"  • ✅ Посещено (G='Посещение'): {attended}")
-            logging.info(f"  • 📅 Запланировано (ВСЕ занятия за период): {planned}")
             logging.info(f"  • ❌ Пропущено (G='Пропуск/Отмена/Перенос'): {missed}")
-            logging.info(f"  • 📊 Посещаемость: {attended}/{planned} = {attendance_rate}%")
+            logging.info(f"  • 📅 Запланировано (E='Запланировано'): {planned}")
+            logging.info(f"  • 📊 Посещаемость: {attended}/{total_actual} = {attendance_rate}% (Посещено/Фактически проведенные)")
             
             # Логируем статусы всех занятий для отладки
             for l in summary['lessons_this_week']:

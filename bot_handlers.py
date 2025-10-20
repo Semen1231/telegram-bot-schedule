@@ -271,6 +271,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     
     keyboard = [
         [InlineKeyboardButton("📊 Дашборд", web_app=WebAppInfo(url="https://web-production-547b.up.railway.app"))],
+        [InlineKeyboardButton("📆 Занятия сегодня", callback_data="today_lessons")],
         [InlineKeyboardButton("📄 Абонементы", callback_data="menu_subscriptions")],
         [InlineKeyboardButton("💰 Прогноз бюджета", callback_data="menu_forecast")],
         [InlineKeyboardButton("📅 Календарь занятий", callback_data="menu_calendar")],
@@ -1843,6 +1844,156 @@ async def calendar_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         keyboard = [[InlineKeyboardButton("⏪ Назад в главное меню", callback_data="main_menu")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(f"❌ Ошибка при загрузке календаря: {e}", reply_markup=reply_markup)
+        return MAIN_MENU
+
+async def today_lessons_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Быстрый переход к занятиям на сегодня."""
+    query = update.callback_query
+    await safe_answer_callback_query(query)
+    
+    try:
+        from datetime import datetime
+        import logging
+        
+        logging.info("🔄 Загрузка занятий на сегодня...")
+        
+        # Получаем сегодняшнюю дату
+        today = datetime.now()
+        date_str = today.strftime('%d.%m.%Y')
+        
+        # Получаем все занятия из календаря
+        try:
+            lessons = sheets_service.get_calendar_lessons()
+            logging.info(f"✅ Загружено занятий из календаря: {len(lessons) if lessons else 0}")
+        except Exception as e:
+            logging.error(f"❌ Ошибка при загрузке календаря: {e}")
+            error_text = "❌ Ошибка при загрузке занятий"
+            if "429" in str(e):
+                error_text += "\n\n⚠️ Превышена квота Google Sheets API.\nПодождите 1-2 минуты и попробуйте снова."
+            else:
+                error_text += f"\n\n{e}"
+            
+            keyboard = [
+                [InlineKeyboardButton("🔄 Попробовать снова", callback_data="today_lessons")],
+                [InlineKeyboardButton("⏪ Назад в главное меню", callback_data="main_menu")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_text(error_text, reply_markup=reply_markup)
+            return MAIN_MENU
+        
+        if not lessons:
+            keyboard = [[InlineKeyboardButton("⏪ Назад в главное меню", callback_data="main_menu")]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_text("📅 Календарь занятий пуст.\n\nСначала создайте абонементы.", reply_markup=reply_markup)
+            return MAIN_MENU
+        
+        # Группируем занятия по датам
+        lessons_by_date = {}
+        for lesson in lessons:
+            lesson_date = lesson.get('Дата занятия', '')
+            if lesson_date and lesson_date.strip():
+                if lesson_date not in lessons_by_date:
+                    lessons_by_date[lesson_date] = []
+                lessons_by_date[lesson_date].append(lesson)
+        
+        # Сохраняем в контекст для дальнейшего использования
+        context.user_data['lessons_by_date'] = lessons_by_date
+        context.user_data['selected_date'] = date_str
+        
+        # Получаем занятия на сегодня
+        lessons_on_date = lessons_by_date.get(date_str, [])
+        
+        logging.info(f"📅 Сегодня: {date_str}, занятий: {len(lessons_on_date)}")
+        
+        if not lessons_on_date:
+            keyboard = [
+                [InlineKeyboardButton("📅 Открыть календарь", callback_data="menu_calendar")],
+                [InlineKeyboardButton("⏪ Назад в главное меню", callback_data="main_menu")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_text(f"📅 *Занятия на сегодня ({date_str})*\n\n❌ На сегодня занятий не запланировано.", reply_markup=reply_markup, parse_mode='Markdown')
+            return MAIN_MENU
+        
+        # Создаем детальную информацию и кнопки для каждого занятия
+        keyboard = []
+        message_text = f"📅 *Занятия на сегодня ({date_str})*\n\n"
+        
+        # Показываем детальную информацию о каждом занятии
+        for i, lesson in enumerate(lessons_on_date):
+            lesson_id = lesson.get('№', '')
+            if not lesson_id:
+                lesson_id = f"{date_str}_{i}_{lesson.get('Ребенок', '')}"
+            
+            subscription_id = lesson.get('ID абонемента', '')
+            child_name = lesson.get('Ребенок', '')
+            start_time = lesson.get('Время начала', '')
+            end_time = lesson.get('Время завершения', '')
+            status = lesson.get('Статус посещения', '')
+            mark = lesson.get('Отметка', '')
+            
+            logging.info(f"Занятие {i+1}: lesson_id='{lesson_id}', child_name='{child_name}', subscription_id='{subscription_id}'")
+            
+            # Получаем детальную информацию об абонементе
+            sub_details = sheets_service.get_subscription_details(subscription_id)
+            circle_name = sub_details.get('circle_name', 'Неизвестно') if sub_details else 'Неизвестно'
+            
+            # Формируем детальный текст занятия
+            lesson_text = f"*{child_name}* - {circle_name}"
+            
+            if start_time and end_time:
+                lesson_text += f"\n🕐 {start_time} - {end_time}"
+            if status:
+                lesson_text += f"\n📊 {status}"
+            if mark:
+                lesson_text += f"\n✅ {mark}"
+            
+            # Добавляем информацию об абонементе
+            if sub_details:
+                lesson_text += f"\n\n📋 *Информация об абонементе:*"
+                lesson_text += f"\n🆔 ID: {subscription_id}"
+                if sub_details.get('start_date'):
+                    lesson_text += f"\n📅 Дата начала: {sub_details['start_date']}"
+                if sub_details.get('end_date_forecast'):
+                    lesson_text += f"\n🔮 Дата окончания прогноз: {sub_details['end_date_forecast']}"
+                if sub_details.get('total_classes'):
+                    lesson_text += f"\n📊 К-во занятий: {sub_details['total_classes']}"
+                if sub_details.get('attended_classes'):
+                    lesson_text += f"\n✅ Прошло занятий: {sub_details['attended_classes']}"
+                if sub_details.get('remaining_classes'):
+                    lesson_text += f"\n⏳ Осталось занятий: {sub_details['remaining_classes']}"
+                if sub_details.get('missed_classes'):
+                    lesson_text += f"\n❌ Пропущено: {sub_details['missed_classes']}"
+                if sub_details.get('cost'):
+                    lesson_text += f"\n💰 Стоимость: {sub_details['cost']} руб."
+                
+                # Получаем прогнозные даты оплат
+                payment_dates = sheets_service.get_forecast_payment_dates(child_name, circle_name)
+                if payment_dates:
+                    lesson_text += f"\n\n💰 *Прогнозные даты оплат:*"
+                    for date in payment_dates:  # Показываем все даты
+                        lesson_text += f"\n💳 {date}"
+            
+            message_text += f"{i+1}. {lesson_text}\n\n"
+            
+            # Создаем кнопку с именем ребенка и кружком
+            button_text = f"{child_name} - {circle_name}"
+            if mark:
+                button_text += f" ✅"
+            
+            keyboard.append([InlineKeyboardButton(button_text, callback_data=f"lesson_select_{lesson_id}")])
+        
+        keyboard.append([InlineKeyboardButton("📅 Открыть календарь", callback_data="menu_calendar")])
+        keyboard.append([InlineKeyboardButton("⏪ Назад в главное меню", callback_data="main_menu")])
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(message_text, reply_markup=reply_markup, parse_mode='Markdown')
+        return SELECT_LESSON_FROM_DATE
+        
+    except Exception as e:
+        logging.error(f"❌ Ошибка в today_lessons_handler: {e}")
+        keyboard = [[InlineKeyboardButton("⏪ Назад в главное меню", callback_data="main_menu")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(f"❌ Ошибка при загрузке занятий на сегодня: {e}", reply_markup=reply_markup)
         return MAIN_MENU
 
 async def calendar_navigation_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -5039,6 +5190,7 @@ def create_conversation_handler() -> ConversationHandler:
                 CallbackQueryHandler(force_refresh_all_data, pattern='^force_refresh_data$'),
                 CallbackQueryHandler(go_back_to_main_menu, pattern='^refresh_main_menu$'),
                 CallbackQueryHandler(go_back_to_main_menu, pattern='^main_menu$'),
+                CallbackQueryHandler(today_lessons_handler, pattern='^today_lessons$'),  # Быстрый переход к занятиям на сегодня
                 # Отладочный обработчик для всех остальных callback'ов в MAIN_MENU
                 CallbackQueryHandler(debug_callback_handler),
             ],

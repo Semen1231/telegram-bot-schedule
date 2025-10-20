@@ -15,10 +15,9 @@ import sys
 # Добавляем корневую папку в путь для импорта наших модулей
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-# ВРЕМЕННО: Создаем минимальный Google Sheets сервис без импорта основного модуля
-import gspread
-from google.oauth2 import service_account
+# Импортируем полный Google Sheets сервис
 import config
+from google_sheets_service import GoogleSheetsService
 
 # Настройка логирования
 logging.basicConfig(
@@ -35,84 +34,10 @@ app = Flask(__name__,
 # Включаем CORS для работы с Telegram Mini App
 CORS(app)
 
-# Минимальный Google Sheets сервис только для дашборда
-class MinimalGoogleSheetsService:
-    def __init__(self, credentials_path, spreadsheet_name):
-        try:
-            scope = [
-                'https://www.googleapis.com/auth/spreadsheets',
-                'https://www.googleapis.com/auth/drive'
-            ]
-            creds = service_account.Credentials.from_service_account_file(credentials_path, scopes=scope)
-            self.client = gspread.authorize(creds)
-            self.spreadsheet = self.client.open(spreadsheet_name)
-            logger.info("✅ Минимальный Google Sheets сервис инициализирован")
-        except Exception as e:
-            logger.error(f"❌ Ошибка инициализации Google Sheets: {e}")
-            raise
-
-    def get_subscriptions_data(self):
-        """Получает данные абонементов для дашборда"""
-        try:
-            sheet = self.spreadsheet.worksheet("Абонементы")
-            return sheet.get_all_records()
-        except Exception as e:
-            logger.error(f"Ошибка получения данных абонементов: {e}")
-            return []
-    
-    # Удален метод get_handbook_items - лист "Справочник" имеет другую структуру
-    
-    def get_calendar_lessons(self):
-        """Получает данные календаря занятий"""
-        try:
-            sheet = self.spreadsheet.worksheet("Календарь занятий")
-            return sheet.get_all_records()
-        except Exception as e:
-            logger.error(f"Ошибка получения календаря занятий: {e}")
-            return []
-    
-    def get_planned_payments(self):
-        """Получает запланированные платежи"""
-        try:
-            sheet = self.spreadsheet.worksheet("Прогноз")
-            return sheet.get_all_records()
-        except Exception as e:
-            logger.error(f"Ошибка получения прогноза платежей: {e}")
-            return []
-    
-    def get_paid_payments(self):
-        """Получает оплаченные платежи"""
-        try:
-            sheet = self.spreadsheet.worksheet("Оплачено")
-            return sheet.get_all_records()
-        except Exception as e:
-            logger.error(f"Ошибка получения оплаченных платежей: {e}")
-            return []
-    
-    def sync_calendar_after_subscription(self, subscription_data):
-        """Синхронизирует календарь после создания абонемента"""
-        try:
-            logger.info(f"🔄 Запуск синхронизации календаря для абонемента: {subscription_data.get('name', 'Неизвестно')}")
-            
-            # Получаем данные абонементов
-            subscriptions = self.get_subscriptions_data()
-            if not subscriptions:
-                logger.warning("Нет данных абонементов для синхронизации")
-                return False
-            
-            # Здесь должна быть логика синхронизации с Google Calendar
-            # Пока что просто логируем
-            logger.info(f"✅ Синхронизация календаря завершена (заглушка)")
-            return True
-            
-        except Exception as e:
-            logger.error(f"❌ Ошибка синхронизации календаря: {e}")
-            return False
-
-# Инициализируем минимальный сервис
+# Инициализируем полный Google Sheets сервис
 try:
-    sheets_service = MinimalGoogleSheetsService(config.GOOGLE_CREDENTIALS_PATH, config.GOOGLE_SHEET_NAME)
-    logger.info("✅ Минимальный Google Sheets сервис готов")
+    sheets_service = GoogleSheetsService(config.GOOGLE_CREDENTIALS_PATH, config.GOOGLE_SHEET_NAME)
+    logger.info("✅ Полный Google Sheets сервис готов")
 except Exception as e:
     logger.error(f"❌ Ошибка инициализации Google Sheets: {e}")
     sheets_service = None
@@ -228,6 +153,7 @@ class DashboardDataService:
         """Получает бюджетные метрики из листов Прогноз или Оплачено"""
         try:
             if not sheets_service:
+                logger.warning(f"⚠️ sheets_service не инициализирован для {sheet_name}")
                 return 0
             
             # Получаем данные из указанного листа
@@ -238,20 +164,36 @@ class DashboardDataService:
             else:
                 return 0
             
+            logger.info(f"📊 {sheet_name}: загружено {len(data) if data else 0} записей")
+            logger.info(f"📅 Период: {start_date.strftime('%d.%m.%Y')} - {end_date.strftime('%d.%m.%Y')}")
+            
             if not data:
+                logger.warning(f"⚠️ Нет данных в листе {sheet_name}")
                 return 0
             
             total_amount = 0
+            matched_count = 0
+            
+            # Логируем первые 3 записи для отладки
+            if data and len(data) > 0:
+                logger.info(f"🔍 Первые записи из {sheet_name}:")
+                for i, payment in enumerate(data[:3], 1):
+                    logger.info(f"  {i}. Дата: {payment.get('payment_date', 'НЕТ')}, Ребенок: {payment.get('child_name', 'НЕТ')}, Сумма: {payment.get('budget' if sheet_name == 'Прогноз' else 'amount', 'НЕТ')}")
             
             for payment in data:
                 try:
                     # Получаем дату оплаты
                     payment_date_str = payment.get('payment_date', '')
                     if not payment_date_str:
+                        logger.debug(f"  ⚠️ Пропущена запись без даты")
                         continue
                     
                     # Парсим дату
-                    payment_date = datetime.strptime(payment_date_str, '%d.%m.%Y')
+                    try:
+                        payment_date = datetime.strptime(payment_date_str, '%d.%m.%Y')
+                    except ValueError:
+                        logger.warning(f"  ⚠️ Неверный формат даты: {payment_date_str}")
+                        continue
                     
                     # Проверяем, попадает ли дата в диапазон
                     if start_date <= payment_date <= end_date:
@@ -268,11 +210,14 @@ class DashboardDataService:
                             amount = float(payment.get('amount', 0) or 0)
                         
                         total_amount += amount
+                        matched_count += 1
+                        logger.debug(f"  ✅ {payment_date_str}: {payment.get('child_name', '')} - {amount} руб.")
                                 
-                except (ValueError, TypeError) as e:
-                    # Пропускаем строки с некорректными данными
+                except (TypeError,) as e:
+                    logger.debug(f"  ⚠️ Ошибка обработки записи: {e}")
                     continue
             
+            logger.info(f"💰 {sheet_name}: найдено {matched_count} записей на сумму {int(total_amount)} руб.")
             return int(total_amount)
             
         except Exception as e:
