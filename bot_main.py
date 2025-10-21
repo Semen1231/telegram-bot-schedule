@@ -45,19 +45,29 @@ async def post_init_handler(application):
             from notification_scheduler import get_notification_scheduler
             notification_scheduler = get_notification_scheduler(application.bot)
             
+            logger.info("📋 Проверяю настройки уведомлений...")
             notification_time = sheets_service.get_notification_time()
             notification_chat_id = sheets_service.get_notification_chat_id()
+            
+            logger.info(f"⏰ Время уведомлений из Справочника (N2): '{notification_time}'")
+            logger.info(f"📱 Chat ID из Справочника (O2): '{notification_chat_id}'")
             
             if notification_time and notification_chat_id:
                 logger.info("🚀 Запускаю планировщик уведомлений...")
                 notification_scheduler.set_chat_id(notification_chat_id)
-                await asyncio.create_task(notification_scheduler.start_scheduler())
+                # ИСПРАВЛЕНО: используем create_task БЕЗ await
+                asyncio.create_task(notification_scheduler.start_scheduler())
+                logger.info("✅ Планировщик уведомлений запущен в фоне")
             else:
-                logger.info("⚠️ Планировщик уведомлений не настроен")
+                if not notification_time:
+                    logger.info("⚠️ Планировщик НЕ запущен: время уведомлений не настроено (ячейка N2 пустая)")
+                if not notification_chat_id:
+                    logger.info("⚠️ Планировщик НЕ запущен: chat_id не настроен (ячейка O2 пустая)")
+                logger.info("💡 Настройте уведомления через бота: Настройки → Настройка уведомлений")
         else:
             logger.info("⚠️ Планировщик пропущен - Google Sheets недоступен")
     except Exception as e:
-        logger.error(f"❌ Ошибка при запуске планировщика: {e}")
+        logger.error(f"❌ Ошибка при запуске планировщика: {e}", exc_info=True)
 
 def main() -> None:
     """Основная функция для запуска бота."""

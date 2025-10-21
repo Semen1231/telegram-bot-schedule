@@ -46,24 +46,38 @@ class NotificationScheduler:
         
     async def _scheduler_loop(self):
         """Основной цикл планировщика"""
+        logging.info("🔄 Планировщик уведомлений: начало основного цикла")
+        
         while self.is_running:
             try:
+                from datetime import datetime
+                current_time = datetime.now().strftime("%H:%M:%S")
+                
                 # Получаем настроенное время уведомлений
                 notification_time = self._get_notification_time()
                 
                 if notification_time:
+                    logging.debug(f"⏰ Текущее время: {current_time}, целевое время: {notification_time}")
+                    
                     # Проверяем, пора ли отправлять уведомления
                     if self._is_notification_time(notification_time):
+                        logging.info(f"🔔 ПОРА ОТПРАВЛЯТЬ УВЕДОМЛЕНИЯ! Текущее время: {current_time}")
                         await self._send_daily_notifications()
                         
                         # Ждем до следующего дня, чтобы не отправлять дубли
+                        logging.info("⏳ Жду 1 час перед следующей проверкой (чтобы избежать дублей)")
                         await asyncio.sleep(3600)  # Ждем час
+                    else:
+                        logging.debug(f"⏰ Еще не время для уведомлений (текущее: {current_time}, целевое: {notification_time})")
+                else:
+                    logging.warning("⚠️ Время уведомлений не настроено в Справочнике (ячейка N2)")
                 
                 # Проверяем каждые 5 минут
+                logging.debug(f"💤 Засыпаю на 5 минут... (текущее время: {current_time})")
                 await asyncio.sleep(300)
                 
             except Exception as e:
-                logging.error(f"❌ Ошибка в планировщике уведомлений: {e}")
+                logging.error(f"❌ Ошибка в планировщике уведомлений: {e}", exc_info=True)
                 await asyncio.sleep(300)  # Ждем 5 минут перед повтором
                 
     def _get_notification_time(self) -> str:
