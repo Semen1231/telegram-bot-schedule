@@ -36,7 +36,12 @@ class GoogleSheetsService:
             time.sleep(3)
             self.spreadsheet = self.client.open(sheet_name)
             
-            logging.info("✅ Google Sheets сервис успешно инициализирован")
+            # Инициализируем кеш для снижения нагрузки на API
+            self._cache = {}
+            self._cache_ttl = {}
+            self._default_cache_duration = 30  # Кеш на 30 секунд по умолчанию
+            
+            logging.info("✅ Google Sheets сервис успешно инициализирован (с кешированием)")
             
             # Используем глобальный экземпляр Google Calendar Service
             try:
@@ -56,6 +61,40 @@ class GoogleSheetsService:
         except Exception as e:
             print(f"Ошибка подключения к Google Таблицам: {e}")
             raise
+    
+    def _get_from_cache(self, key):
+        """Получает данные из кеша, если они еще актуальны."""
+        if key in self._cache and key in self._cache_ttl:
+            if time.time() < self._cache_ttl[key]:
+                logging.debug(f"📦 Данные '{key}' получены из кеша")
+                return self._cache[key]
+            else:
+                # Кеш устарел, удаляем
+                del self._cache[key]
+                del self._cache_ttl[key]
+                logging.debug(f"⏰ Кеш '{key}' устарел и удален")
+        return None
+    
+    def _save_to_cache(self, key, data, duration=None):
+        """Сохраняет данные в кеш."""
+        if duration is None:
+            duration = self._default_cache_duration
+        self._cache[key] = data
+        self._cache_ttl[key] = time.time() + duration
+        logging.debug(f"💾 Данные '{key}' сохранены в кеш на {duration} сек")
+    
+    def _clear_cache(self, key=None):
+        """Очищает кеш (полностью или конкретный ключ)."""
+        if key:
+            if key in self._cache:
+                del self._cache[key]
+            if key in self._cache_ttl:
+                del self._cache_ttl[key]
+            logging.debug(f"🗑️ Кеш '{key}' очищен")
+        else:
+            self._cache.clear()
+            self._cache_ttl.clear()
+            logging.debug("🗑️ Весь кеш очищен")
     
     def handle_network_error(self, e, operation_name="операции"):
         """Обрабатывает сетевые ошибки и возвращает понятное сообщение."""
@@ -2470,8 +2509,14 @@ class GoogleSheetsService:
             return False
 
     def get_calendar_lessons(self):
-        """Получает все занятия из календаря занятий."""
+        """Получает все занятия из календаря занятий (с кешированием)."""
         try:
+            # Проверяем кеш
+            cache_key = 'calendar_lessons'
+            cached_data = self._get_from_cache(cache_key)
+            if cached_data is not None:
+                return cached_data
+            
             logging.info("📋 Подключение к листу 'Календарь занятий'...")
             
             # Попытка с повтором при превышении квоты
@@ -2498,6 +2543,7 @@ class GoogleSheetsService:
             logging.info("📊 Загрузка данных из листа...")
             
             # Аналогично для загрузки данных
+            data = None
             for attempt in range(max_retries):
                 try:
                     data = calendar_sheet.get_all_records()
@@ -2511,11 +2557,18 @@ class GoogleSheetsService:
                     else:
                         raise
             
-            logging.info(f"✅ Успешно загружено {len(data)} записей из календаря")
-            if data:
-                logging.info(f"📝 Пример первой записи: {data[0]}")
-            
-            return data
+            if data is not None:
+                logging.info(f"✅ Успешно загружено {len(data)} записей из календаря")
+                if data:
+                    logging.info(f"📝 Пример первой записи: {data[0]}")
+                
+                # Сохраняем в кеш на 30 секунд
+                self._save_to_cache(cache_key, data, duration=30)
+                
+                return data
+            else:
+                return []
+                
         except Exception as e:
             logging.error(f"❌ Ошибка при получении календаря занятий: {e}", exc_info=True)
             return []
@@ -2684,6 +2737,10 @@ class GoogleSheetsService:
             
             # Синхронизация календаря будет выполнена в фоновом процессе
             logging.info("✅ Отметка сохранена, столбцы H/I/M будут обновлены в update_subscription_stats()")
+            
+            # Очищаем кеш календаря занятий после изменения
+            self._clear_cache('calendar_lessons')
+            logging.debug("🗑️ Кеш календаря очищен после обновления отметки")
             
             # Возвращаем subscription_id для обновления статистики
             return {'success': True, 'subscription_id': subscription_id}

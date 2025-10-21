@@ -13,8 +13,9 @@ async def safe_answer_callback_query(query, text=None):
     try:
         await query.answer(text)
     except Exception as e:
-        if "too old" in str(e) or "timeout expired" in str(e):
-            logging.warning(f"⚠️ Callback query устарел: {e}")
+        if "too old" in str(e) or "timeout expired" in str(e) or "query id is invalid" in str(e):
+            # Устаревшие queries - это нормально при медленной работе, игнорируем без WARNING
+            logging.debug(f"🕐 Callback query устарел (игнорируем): {type(e).__name__}")
             # Продолжаем выполнение без ответа на query
         else:
             logging.error(f"❌ Ошибка при ответе на callback query: {e}")
