@@ -35,6 +35,11 @@ class Dashboard {
     setupTooltipGlobalHandler() {
         const tooltip = document.getElementById('tooltip');
         if (tooltip) {
+            // Определяем, является ли устройство мобильным
+            this.isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
+                           ('ontouchstart' in window) ||
+                           (navigator.maxTouchPoints > 0);
+            
             document.addEventListener('click', (e) => {
                 if (tooltip.style.display === 'block' && 
                     !e.target.classList.contains('progress-segment') &&
@@ -42,7 +47,7 @@ class Dashboard {
                     tooltip.style.display = 'none';
                 }
             });
-            console.log('✅ Глобальный обработчик для тултипа установлен');
+            console.log(`✅ Глобальный обработчик для тултипа установлен (${this.isMobile ? 'Мобильное' : 'Десктоп'} устройство)`);
         }
     }
     
@@ -516,6 +521,8 @@ class Dashboard {
         
         // Добавляем обработчики для tooltip (десктоп и мобильные)
         if (tooltip) {
+            const isMobile = this.isMobile; // Используем определение из init
+            
             container.querySelectorAll('.progress-segment').forEach(segment => {
                 // Функция показа тултипа
                 const showTooltip = (e) => {
@@ -547,19 +554,24 @@ class Dashboard {
                     tooltip.style.display = 'none';
                 };
                 
-                // Десктоп: mousemove и mouseout
-                segment.addEventListener('mousemove', showTooltip);
-                segment.addEventListener('mouseout', hideTooltip);
-                
-                // Мобильные: click для переключения видимости
-                segment.addEventListener('click', (e) => {
-                    e.stopPropagation(); // Предотвращаем всплытие события
-                    if (tooltip.style.display === 'block') {
-                        hideTooltip();
-                    } else {
-                        showTooltip(e);
-                    }
-                });
+                if (isMobile) {
+                    // МОБИЛЬНЫЕ: только click, БЕЗ mouse событий
+                    segment.addEventListener('click', (e) => {
+                        e.preventDefault(); // Предотвращаем стандартное поведение
+                        e.stopPropagation(); // Предотвращаем всплытие события
+                        
+                        // Закрываем все другие тултипы перед открытием нового
+                        if (tooltip.style.display === 'block') {
+                            hideTooltip();
+                        } else {
+                            showTooltip(e);
+                        }
+                    });
+                } else {
+                    // ДЕСКТОП: mousemove и mouseout
+                    segment.addEventListener('mousemove', showTooltip);
+                    segment.addEventListener('mouseout', hideTooltip);
+                }
             });
         }
     }
@@ -649,6 +661,8 @@ class Dashboard {
         
         // Добавляем обработчики для tooltip (десктоп и мобильные)
         if (tooltip) {
+            const isMobile = this.isMobile; // Используем определение из init
+            
             container.querySelectorAll('.progress-segment').forEach(segment => {
                 // Функция показа тултипа
                 const showTooltip = (e) => {
@@ -680,19 +694,24 @@ class Dashboard {
                     tooltip.style.display = 'none';
                 };
                 
-                // Десктоп: mousemove и mouseout
-                segment.addEventListener('mousemove', showTooltip);
-                segment.addEventListener('mouseout', hideTooltip);
-                
-                // Мобильные: click для переключения видимости
-                segment.addEventListener('click', (e) => {
-                    e.stopPropagation(); // Предотвращаем всплытие события
-                    if (tooltip.style.display === 'block') {
-                        hideTooltip();
-                    } else {
-                        showTooltip(e);
-                    }
-                });
+                if (isMobile) {
+                    // МОБИЛЬНЫЕ: только click, БЕЗ mouse событий
+                    segment.addEventListener('click', (e) => {
+                        e.preventDefault(); // Предотвращаем стандартное поведение
+                        e.stopPropagation(); // Предотвращаем всплытие события
+                        
+                        // Закрываем все другие тултипы перед открытием нового
+                        if (tooltip.style.display === 'block') {
+                            hideTooltip();
+                        } else {
+                            showTooltip(e);
+                        }
+                    });
+                } else {
+                    // ДЕСКТОП: mousemove и mouseout
+                    segment.addEventListener('mousemove', showTooltip);
+                    segment.addEventListener('mouseout', hideTooltip);
+                }
             });
         }
     }
