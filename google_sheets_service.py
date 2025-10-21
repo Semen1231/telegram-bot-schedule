@@ -2573,6 +2573,32 @@ class GoogleSheetsService:
             logging.error(f"❌ Ошибка при получении календаря занятий: {e}", exc_info=True)
             return []
 
+    def get_subscriptions_data(self):
+        """Получает данные абонементов для дашборда (с кешированием)."""
+        try:
+            # Проверяем кеш
+            cache_key = 'subscriptions_data'
+            cached_data = self._get_from_cache(cache_key)
+            if cached_data is not None:
+                return cached_data
+            
+            logging.info("📋 Загрузка данных абонементов...")
+            
+            # Получаем лист абонементов
+            subs_sheet = self.spreadsheet.worksheet("Абонементы")
+            data = subs_sheet.get_all_records()
+            
+            logging.info(f"✅ Успешно загружено {len(data)} абонементов")
+            
+            # Сохраняем в кеш на 30 секунд
+            self._save_to_cache(cache_key, data, duration=30)
+            
+            return data
+            
+        except Exception as e:
+            logging.error(f"❌ Ошибка при получении данных абонементов: {e}", exc_info=True)
+            return []
+
     def get_lessons_by_subscription(self, subscription_id):
         """Получает занятия для конкретного абонемента с номерами строк."""
         try:
