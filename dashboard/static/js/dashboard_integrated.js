@@ -27,6 +27,23 @@ class Dashboard {
         
         // Первоначальная загрузка данных
         this.loadDashboardData();
+        
+        // Глобальный обработчик для закрытия тултипа при клике вне его области
+        this.setupTooltipGlobalHandler();
+    }
+    
+    setupTooltipGlobalHandler() {
+        const tooltip = document.getElementById('tooltip');
+        if (tooltip) {
+            document.addEventListener('click', (e) => {
+                if (tooltip.style.display === 'block' && 
+                    !e.target.classList.contains('progress-segment') &&
+                    !tooltip.contains(e.target)) {
+                    tooltip.style.display = 'none';
+                }
+            });
+            console.log('✅ Глобальный обработчик для тултипа установлен');
+        }
     }
     
     initTelegramWebApp() {
@@ -497,14 +514,25 @@ class Dashboard {
             container.innerHTML += cardHTML;
         });
         
-        // Добавляем обработчики для tooltip
+        // Добавляем обработчики для tooltip (десктоп и мобильные)
         if (tooltip) {
             container.querySelectorAll('.progress-segment').forEach(segment => {
-                segment.addEventListener('mousemove', (e) => {
+                // Функция показа тултипа
+                const showTooltip = (e) => {
                     const data = e.target.dataset;
                     tooltip.style.display = 'block';
-                    tooltip.style.left = `${e.pageX + 10}px`;
-                    tooltip.style.top = `${e.pageY + 10}px`;
+                    
+                    // Позиционирование для десктопа (mousemove) или мобильного (click/touch)
+                    if (e.type === 'mousemove') {
+                        tooltip.style.left = `${e.pageX + 10}px`;
+                        tooltip.style.top = `${e.pageY + 10}px`;
+                    } else {
+                        // Для click/touch - позиционируем относительно элемента
+                        const rect = e.target.getBoundingClientRect();
+                        tooltip.style.left = `${rect.left + window.scrollX}px`;
+                        tooltip.style.top = `${rect.bottom + window.scrollY + 5}px`;
+                    }
+                    
                     const timeRange = data.start && data.end ? `${data.start} - ${data.end}` : data.start || 'Время не указано';
                     tooltip.innerHTML = `
                         <div class="font-bold text-white">${data.date}</div>
@@ -512,9 +540,25 @@ class Dashboard {
                         <div class="text-gray-400">Статус: ${data.status}</div>
                         <div class="text-gray-400">ID: ${data.id}</div>
                     `;
-                });
-                segment.addEventListener('mouseout', () => {
+                };
+                
+                // Функция скрытия тултипа
+                const hideTooltip = () => {
                     tooltip.style.display = 'none';
+                };
+                
+                // Десктоп: mousemove и mouseout
+                segment.addEventListener('mousemove', showTooltip);
+                segment.addEventListener('mouseout', hideTooltip);
+                
+                // Мобильные: click для переключения видимости
+                segment.addEventListener('click', (e) => {
+                    e.stopPropagation(); // Предотвращаем всплытие события
+                    if (tooltip.style.display === 'block') {
+                        hideTooltip();
+                    } else {
+                        showTooltip(e);
+                    }
                 });
             });
         }
@@ -603,14 +647,25 @@ class Dashboard {
             container.innerHTML += cardHTML;
         });
         
-        // Добавляем обработчики для tooltip
+        // Добавляем обработчики для tooltip (десктоп и мобильные)
         if (tooltip) {
             container.querySelectorAll('.progress-segment').forEach(segment => {
-                segment.addEventListener('mousemove', (e) => {
+                // Функция показа тултипа
+                const showTooltip = (e) => {
                     const data = e.target.dataset;
                     tooltip.style.display = 'block';
-                    tooltip.style.left = `${e.pageX + 10}px`;
-                    tooltip.style.top = `${e.pageY + 10}px`;
+                    
+                    // Позиционирование для десктопа (mousemove) или мобильного (click/touch)
+                    if (e.type === 'mousemove') {
+                        tooltip.style.left = `${e.pageX + 10}px`;
+                        tooltip.style.top = `${e.pageY + 10}px`;
+                    } else {
+                        // Для click/touch - позиционируем относительно элемента
+                        const rect = e.target.getBoundingClientRect();
+                        tooltip.style.left = `${rect.left + window.scrollX}px`;
+                        tooltip.style.top = `${rect.bottom + window.scrollY + 5}px`;
+                    }
+                    
                     const timeRange = data.start && data.end ? `${data.start} - ${data.end}` : data.start || 'Время не указано';
                     tooltip.innerHTML = `
                         <div class="font-bold text-white">${data.date}</div>
@@ -618,9 +673,25 @@ class Dashboard {
                         <div class="text-gray-400">Статус: ${data.status}</div>
                         <div class="text-gray-400">ID: ${data.id}</div>
                     `;
-                });
-                segment.addEventListener('mouseout', () => {
+                };
+                
+                // Функция скрытия тултипа
+                const hideTooltip = () => {
                     tooltip.style.display = 'none';
+                };
+                
+                // Десктоп: mousemove и mouseout
+                segment.addEventListener('mousemove', showTooltip);
+                segment.addEventListener('mouseout', hideTooltip);
+                
+                // Мобильные: click для переключения видимости
+                segment.addEventListener('click', (e) => {
+                    e.stopPropagation(); // Предотвращаем всплытие события
+                    if (tooltip.style.display === 'block') {
+                        hideTooltip();
+                    } else {
+                        showTooltip(e);
+                    }
                 });
             });
         }
