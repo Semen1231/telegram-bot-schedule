@@ -282,14 +282,11 @@ class DashboardDataService:
                         missed_value = sub.get(available_keys[12], 0)
                         missed_lessons = int(missed_value) if missed_value else 0
                     
-                    # Вычисляем общее количество занятий: прошло + осталось + пропущено
-                    # Серые блоки в прогрессивной шкале = осталось + пропущено
-                    total_lessons = completed_lessons + remaining_lessons + missed_lessons
+                    # ИСПРАВЛЕНО: Вычисляем общее количество занятий ТОЛЬКО как H + I
+                    # (пропущенные уже учтены в H - "Прошло занятий")
+                    total_lessons = completed_lessons + remaining_lessons
                     
-                    # Процент выполнения для подписи: прошло / только_столбец_I * 100
-                    display_percent = (completed_lessons / remaining_lessons * 100) if remaining_lessons > 0 else 0
-                    
-                    # Процент для прогресс-бара: прошло / всего * 100 (включая пропущенные)
+                    # ИСПРАВЛЕНО: Процент = прошло / всего * 100 (где всего = H + I)
                     progress_percent = (completed_lessons / total_lessons * 100) if total_lessons > 0 else 0
                     
                     # Получаем данные занятий из календаря для этого абонемента
@@ -311,9 +308,9 @@ class DashboardDataService:
                         'name': f"{circle_name} - {child_name}",
                         'total_lessons': total_lessons,
                         'completed_lessons': completed_lessons,
-                        'remaining_lessons': remaining_lessons + missed_lessons,  # Серые блоки = осталось + пропущено
-                        'display_total': remaining_lessons,  # Только столбец I для подписи
-                        'display_percent': round(display_percent, 1),  # Процент для подписи
+                        'remaining_lessons': remaining_lessons,  # ИСПРАВЛЕНО: только столбец I
+                        'display_total': total_lessons,  # ИСПРАВЛЕНО: H + I для подписи
+                        'display_percent': round(progress_percent, 1),  # ИСПРАВЛЕНО: используем тот же процент
                         'progress_percent': round(progress_percent, 1),  # Процент для прогресс-бара
                         'missed_this_month': missed_this_month,
                         'lessons': []
@@ -400,14 +397,11 @@ class DashboardDataService:
                         missed_value = sub.get(available_keys[12], 0)
                         missed_lessons = int(missed_value) if missed_value else 0
                     
-                    # Вычисляем общее количество занятий: прошло + осталось + пропущено
-                    # Серые блоки в прогрессивной шкале = осталось + пропущено
-                    total_lessons = completed_lessons + remaining_lessons + missed_lessons
+                    # ИСПРАВЛЕНО: Вычисляем общее количество занятий ТОЛЬКО как H + I
+                    # (пропущенные уже учтены в H - "Прошло занятий")
+                    total_lessons = completed_lessons + remaining_lessons
                     
-                    # Процент выполнения для подписи: прошло / только_столбец_I * 100
-                    display_percent = (completed_lessons / remaining_lessons * 100) if remaining_lessons > 0 else 100
-                    
-                    # Процент для прогресс-бара: прошло / всего * 100 (включая пропущенные)
+                    # ИСПРАВЛЕНО: Процент = прошло / всего * 100 (где всего = H + I)
                     progress_percent = (completed_lessons / total_lessons * 100) if total_lessons > 0 else 100
                     
                     # Получаем данные занятий из календаря для этого абонемента
@@ -428,9 +422,9 @@ class DashboardDataService:
                         'name': f"{circle_name} - {child_name}",
                         'total_lessons': total_lessons,
                         'completed_lessons': completed_lessons,
-                        'remaining_lessons': remaining_lessons + missed_lessons,  # Серые блоки = осталось + пропущено
-                        'display_total': remaining_lessons,  # Только столбец I для подписи
-                        'display_percent': round(display_percent, 1),  # Процент для подписи
+                        'remaining_lessons': remaining_lessons,  # ИСПРАВЛЕНО: только столбец I
+                        'display_total': total_lessons,  # ИСПРАВЛЕНО: H + I для подписи
+                        'display_percent': round(progress_percent, 1),  # ИСПРАВЛЕНО: используем тот же процент
                         'progress_percent': round(progress_percent, 1),  # Процент для прогресс-бара
                         'missed_total': missed_total,
                         'status': 'Завершен',
