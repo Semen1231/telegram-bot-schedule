@@ -2736,8 +2736,12 @@ class GoogleSheetsService:
                             }
                         }
                     else:
-                        # Для отметки "Посещение" просто обновляем без выбора переноса
+                        # Для отметки "Посещение" - создаем запись в "Оплачено"
                         logging.info(f"🎯 Разовый абонемент {subscription_id} - отметка '{mark}' без выбора переноса")
+                        
+                        if mark.lower() == 'посещение':
+                            # Создаем запись об оплате в листе "Оплачено"
+                            self._create_payment_record_for_razoviy(subscription_id, subscription_info, lesson_data_row)
             
             # Проверяем, нужно ли создать новое занятие при отмене или переносе (для обычных абонементов)
             # ВАЖНО: "Пропуск (по вине)" НЕ создает замещающее занятие!
@@ -3249,6 +3253,52 @@ class GoogleSheetsService:
             
         except Exception as e:
             logging.error(f"❌ Ошибка при обновлении статистики разового абонемента {subscription_id}: {e}")
+            return False
+
+    def _create_payment_record_for_razoviy(self, subscription_id, subscription_info, lesson_data_row):
+        """Создает запись об оплате в листе 'Оплачено' для разового абонемента при отметке 'Посещение'."""
+        try:
+            # Получаем данные для записи
+            circle_name = subscription_info.get('circle_name', '')
+            child_name = subscription_info.get('child_name', '')
+            cost = subscription_info.get('cost', 0)
+            lesson_date = lesson_data_row[2] if len(lesson_data_row) > 2 else ''  # C:C - Дата занятия
+            
+            # Проверяем обязательные данные
+            if not circle_name or not child_name or not lesson_date:
+                logging.warning(f"⚠️ Недостаточно данных для создания записи в 'Оплачено': кружок={circle_name}, ребенок={child_name}, дата={lesson_date}")
+                return False
+            
+            # Получаем или создаем лист "Оплачено"
+            try:
+                paid_sheet = self.spreadsheet.worksheet("Оплачено")
+            except:
+                # Создаем лист "Оплачено" если его нет
+                paid_sheet = self.spreadsheet.add_worksheet(title="Оплачено", rows=1000, cols=5)
+                # Добавляем заголовки
+                headers = ["Кружок", "Ребенок", "Дата оплаты", "Бюджет", "Статус"]
+                paid_sheet.update('A1:E1', [headers])
+                logging.info("✅ Создан лист 'Оплачено' с заголовками")
+            
+            # Проверяем, не существует ли уже такая запись
+            all_paid_data = paid_sheet.get_all_values()
+            for row in all_paid_data[1:]:  # Пропускаем заголовки
+                if len(row) >= 3:
+                    if (str(row[0]).strip() == str(circle_name).strip() and 
+                        str(row[1]).strip() == str(child_name).strip() and 
+                        str(row[2]).strip() == str(lesson_date).strip()):
+                        logging.info(f"ℹ️ Запись в 'Оплачено' уже существует для {child_name} - {circle_name} на {lesson_date}")
+                        return True
+            
+            # Создаем новую запись
+            new_row = [circle_name, child_name, lesson_date, cost, "Оплачено"]
+            paid_sheet.append_row(new_row, value_input_option='USER_ENTERED')
+            
+            logging.info(f"✅ Создана запись в 'Оплачено': {child_name} - {circle_name}, дата {lesson_date}, сумма {cost}")
+            return True
+            
+        except Exception as e:
+            logging.error(f"❌ Ошибка при создании записи в 'Оплачено' для разового абонемента {subscription_id}: {e}")
             return False
 
     def create_razoviy_replacement_lesson(self, subscription_id, child_name, selected_date, original_lesson_data):
