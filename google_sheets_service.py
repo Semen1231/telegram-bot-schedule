@@ -3306,6 +3306,40 @@ class GoogleSheetsService:
                 logging.warning(f"⚠️ Недостаточно данных для создания записи в 'Оплачено': кружок={circle_name}, ребенок={child_name}, дата={lesson_date}")
                 return False
             
+            logging.info(f"🔍 Обработка разового абонемента: {circle_name} - {child_name}, дата {lesson_date}")
+            
+            # ВАЖНО: СНАЧАЛА удаляем запись из листа "Прогноз" (если она там есть)
+            # Это нужно делать ДО проверки существования в "Оплачено", чтобы очистить прогноз в любом случае
+            try:
+                forecast_sheet = self.spreadsheet.worksheet("Прогноз")
+                forecast_data = forecast_sheet.get_all_values()
+                
+                # Ищем и удаляем запись с такими же данными
+                found_in_forecast = False
+                for i, row in enumerate(forecast_data[1:], start=2):  # Начинаем со строки 2
+                    if len(row) >= 3:
+                        # Сравниваем кружок, ребенка и дату
+                        row_circle = str(row[0]).strip()
+                        row_child = str(row[1]).strip()
+                        row_date = str(row[2]).strip()
+                        
+                        logging.debug(f"🔍 Проверка строки {i} прогноза: '{row_circle}' == '{circle_name}', '{row_child}' == '{child_name}', '{row_date}' == '{lesson_date}'")
+                        
+                        if (row_circle == str(circle_name).strip() and 
+                            row_child == str(child_name).strip() and 
+                            row_date == str(lesson_date).strip()):
+                            forecast_sheet.delete_rows(i)
+                            logging.info(f"✅ Удалена запись из 'Прогноз' (строка {i}): {child_name} - {circle_name} на {lesson_date}")
+                            found_in_forecast = True
+                            break
+                
+                if not found_in_forecast:
+                    logging.info(f"ℹ️ Запись не найдена в 'Прогноз' (возможно уже удалена): {child_name} - {circle_name} на {lesson_date}")
+                    
+            except Exception as e:
+                logging.warning(f"⚠️ Не удалось удалить запись из 'Прогноз': {e}")
+                # Продолжаем выполнение - это не критичная ошибка
+            
             # Получаем или создаем лист "Оплачено"
             try:
                 paid_sheet = self.spreadsheet.worksheet("Оплачено")
@@ -3317,7 +3351,7 @@ class GoogleSheetsService:
                 paid_sheet.update('A1:E1', [headers])
                 logging.info("✅ Создан лист 'Оплачено' с заголовками")
             
-            # Проверяем, не существует ли уже такая запись
+            # Проверяем, не существует ли уже такая запись в "Оплачено"
             all_paid_data = paid_sheet.get_all_values()
             for row in all_paid_data[1:]:  # Пропускаем заголовки
                 if len(row) >= 3:
@@ -3327,29 +3361,11 @@ class GoogleSheetsService:
                         logging.info(f"ℹ️ Запись в 'Оплачено' уже существует для {child_name} - {circle_name} на {lesson_date}")
                         return True
             
-            # Создаем новую запись
+            # Создаем новую запись в "Оплачено"
             new_row = [circle_name, child_name, lesson_date, cost, "Оплачено"]
             paid_sheet.append_row(new_row, value_input_option='USER_ENTERED')
             
             logging.info(f"✅ Создана запись в 'Оплачено': {child_name} - {circle_name}, дата {lesson_date}, сумма {cost}")
-            
-            # ВАЖНО: Удаляем запись из листа "Прогноз" (если она там есть)
-            try:
-                forecast_sheet = self.spreadsheet.worksheet("Прогноз")
-                forecast_data = forecast_sheet.get_all_values()
-                
-                # Ищем и удаляем запись с такими же данными
-                for i, row in enumerate(forecast_data[1:], start=2):  # Начинаем со строки 2
-                    if len(row) >= 3:
-                        if (str(row[0]).strip() == str(circle_name).strip() and 
-                            str(row[1]).strip() == str(child_name).strip() and 
-                            str(row[2]).strip() == str(lesson_date).strip()):
-                            forecast_sheet.delete_rows(i)
-                            logging.info(f"✅ Удалена запись из 'Прогноз': {child_name} - {circle_name} на {lesson_date}")
-                            break
-            except Exception as e:
-                logging.warning(f"⚠️ Не удалось удалить запись из 'Прогноз': {e}")
-                # Не прерываем выполнение, т.к. главное - создать запись в "Оплачено"
             
             return True
             
@@ -3357,6 +3373,63 @@ class GoogleSheetsService:
             logging.error(f"❌ Ошибка при создании записи в 'Оплачено' для разового абонемента {subscription_id}: {e}")
             return False
 
+    def cleanup_forecast_duplicates(self):
+        """
+        Удаляет из листа 'Прогноз' все записи, которые уже есть в листе 'Оплачено'.
+        Эта функция нужна для очистки старых записей, которые не были удалены автоматически.
+        """
+        try:
+            logging.info("🧹 Начало очистки дубликатов между 'Прогноз' и 'Оплачено'...")
+            
+            # Получаем данные из обоих листов
+            try:
+                forecast_sheet = self.spreadsheet.worksheet("Прогноз")
+                paid_sheet = self.spreadsheet.worksheet("Оплачено")
+            except Exception as e:
+                logging.error(f"❌ Не удалось получить листы 'Прогноз' или 'Оплачено': {e}")
+                return 0
+            
+            forecast_data = forecast_sheet.get_all_values()
+            paid_data = paid_sheet.get_all_values()
+            
+            if len(forecast_data) < 2 or len(paid_data) < 2:
+                logging.info("ℹ️ Нет данных для проверки")
+                return 0
+            
+            # Создаем набор оплаченных записей (кружок, ребенок, дата)
+            paid_records = set()
+            for row in paid_data[1:]:  # Пропускаем заголовки
+                if len(row) >= 3:
+                    key = (str(row[0]).strip(), str(row[1]).strip(), str(row[2]).strip())
+                    paid_records.add(key)
+            
+            logging.info(f"📊 Найдено {len(paid_records)} оплаченных записей")
+            
+            # Ищем дубликаты в прогнозе и удаляем их (идем с конца, чтобы индексы не сбивались)
+            rows_to_delete = []
+            for i, row in enumerate(forecast_data[1:], start=2):  # Начинаем со строки 2
+                if len(row) >= 3:
+                    key = (str(row[0]).strip(), str(row[1]).strip(), str(row[2]).strip())
+                    if key in paid_records:
+                        rows_to_delete.append((i, row[0], row[1], row[2]))
+            
+            # Удаляем строки с конца, чтобы индексы не сбивались
+            deleted_count = 0
+            for row_index, circle, child, date in reversed(rows_to_delete):
+                try:
+                    forecast_sheet.delete_rows(row_index)
+                    logging.info(f"✅ Удалена дубликат из 'Прогноз' (строка {row_index}): {child} - {circle} на {date}")
+                    deleted_count += 1
+                except Exception as e:
+                    logging.error(f"❌ Ошибка при удалении строки {row_index}: {e}")
+            
+            logging.info(f"🎯 Очистка завершена. Удалено дубликатов: {deleted_count}")
+            return deleted_count
+            
+        except Exception as e:
+            logging.error(f"❌ Ошибка при очистке дубликатов: {e}")
+            return 0
+    
     def create_razoviy_replacement_lesson(self, subscription_id, child_name, selected_date, original_lesson_data):
         """Создает замещающее занятие для разового абонемента на выбранную дату."""
         try:
