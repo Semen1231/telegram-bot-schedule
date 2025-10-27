@@ -21,6 +21,25 @@ async def safe_answer_callback_query(query, text=None):
             logging.error(f"❌ Ошибка при ответе на callback query: {e}")
             # Не поднимаем исключение, чтобы не ломать функциональность
 
+async def safe_edit_message(query, text, reply_markup=None, parse_mode=None):
+    """Безопасно редактирует сообщение с обработкой ошибок."""
+    try:
+        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
+    except Exception as e:
+        error_str = str(e).lower()
+        if "not modified" in error_str or "message is not modified" in error_str:
+            # Сообщение уже имеет такое же содержимое - игнорируем
+            logging.debug(f"📝 Сообщение не изменено (контент тот же): игнорируем")
+        elif "message can't be edited" in error_str:
+            # Сообщение слишком старое для редактирования
+            logging.debug(f"⏰ Сообщение слишком старое для редактирования: игнорируем")
+        elif "too old" in error_str:
+            # Query устарел
+            logging.debug(f"🕐 Query устарел при редактировании: игнорируем")
+        else:
+            logging.error(f"❌ Ошибка при редактировании сообщения: {e}")
+            # Не поднимаем исключение, чтобы не ломать функциональность
+
 # Настройка логирования
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -2053,7 +2072,7 @@ async def calendar_navigation_handler(update: Update, context: ContextTypes.DEFA
 async def select_calendar_date(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Показывает занятия на выбранную дату."""
     query = update.callback_query
-    await query.answer()
+    await safe_answer_callback_query(query)
     
     try:
         # Извлекаем дату из callback_data
@@ -2165,7 +2184,7 @@ async def select_calendar_date(update: Update, context: ContextTypes.DEFAULT_TYP
 async def select_lesson_from_date(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Показывает варианты отметок для выбранного занятия."""
     query = update.callback_query
-    await query.answer()
+    await safe_answer_callback_query(query)
     
     try:
         # Логирование для отладки
@@ -3576,7 +3595,7 @@ async def subscriptions_menu(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def select_subscription_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Обрабатывает выбор конкретного абонемента из списка."""
     query = update.callback_query
-    await query.answer()
+    await safe_answer_callback_query(query)
     
     sub_id = query.data.replace("select_sub_", "")
     context.user_data['selected_sub_id'] = sub_id
@@ -3588,7 +3607,7 @@ async def select_subscription_handler(update: Update, context: ContextTypes.DEFA
     selected_sub_info = next((sub for sub in all_subs if str(sub.get('ID абонемента')) == str(sub_id)), None)
     
     if not selected_sub_info:
-        await query.edit_message_text("Не удалось найти информацию. Возможно, он был изменен.")
+        await safe_edit_message(query, "Не удалось найти информацию. Возможно, он был изменен.")
         query.data = 'menu_subscriptions'
         return await subscriptions_menu(update, context)
         
@@ -3703,7 +3722,7 @@ async def select_subscription_handler(update: Update, context: ContextTypes.DEFA
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    await query.edit_message_text(message_text, reply_markup=reply_markup, parse_mode='HTML')
+    await safe_edit_message(query, message_text, reply_markup=reply_markup, parse_mode='HTML')
     return MANAGE_SUBSCRIPTION
 
 async def manage_subscription_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:

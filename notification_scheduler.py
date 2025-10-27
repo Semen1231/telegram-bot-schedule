@@ -81,15 +81,14 @@ class NotificationScheduler:
                 await asyncio.sleep(300)  # Ждем 5 минут перед повтором
                 
     def _get_notification_time(self) -> str:
-        """Получает настроенное время уведомлений из Справочника"""
+        """Получает настроенное время уведомлений из Справочника через централизованный метод."""
         try:
-            # Получаем время из ячейки N2 листа "Справочник"
-            handbook_sheet = sheets_service.spreadsheet.worksheet("Справочник")
-            notification_time = handbook_sheet.acell('N2').value
+            # Используем централизованный метод с retry механизмом
+            notification_time = sheets_service.get_notification_time()
             
-            if notification_time and notification_time.strip():
+            if notification_time:
                 logging.info(f"⏰ Настроенное время уведомлений: {notification_time}")
-                return notification_time.strip()
+                return notification_time
             else:
                 logging.info("⏰ Время уведомлений не настроено")
                 return None

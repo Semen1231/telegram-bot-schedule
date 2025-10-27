@@ -7309,19 +7309,41 @@ class GoogleSheetsService:
             return None
 
     def get_notification_time(self):
-        """Получает настроенное время уведомлений из ячейки N2 листа Справочник."""
-        try:
-            handbook_sheet = self.spreadsheet.worksheet("Справочник")
-            notification_time = handbook_sheet.acell('N2').value
-            
-            if notification_time and notification_time.strip():
-                return notification_time.strip()
-            else:
-                return None
+        """Получает настроенное время уведомлений из ячейки N2 листа Справочник с retry механизмом."""
+        import time
+        max_retries = 3
+        retry_delay = 5  # секунд
+        
+        for attempt in range(max_retries):
+            try:
+                # Добавляем задержку для снижения нагрузки на API
+                if attempt > 0:
+                    time.sleep(retry_delay * attempt)
                 
-        except Exception as e:
-            logging.error(f"Ошибка при получении времени уведомлений: {e}")
-            return None
+                handbook_sheet = self.spreadsheet.worksheet("Справочник")
+                notification_time = handbook_sheet.acell('N2').value
+                
+                if notification_time and notification_time.strip():
+                    return notification_time.strip()
+                else:
+                    return None
+                    
+            except Exception as e:
+                error_str = str(e)
+                # Обработка временных ошибок Google Sheets API
+                if any(code in error_str for code in ['500', '503', 'Internal error', 'service is currently unavailable']):
+                    if attempt < max_retries - 1:
+                        logging.warning(f"⚠️ Временная ошибка Google Sheets API (попытка {attempt + 1}/{max_retries}): {e}")
+                        continue
+                    else:
+                        logging.error(f"❌ Не удалось получить время уведомлений после {max_retries} попыток: {e}")
+                        return None
+                else:
+                    # Другие ошибки - сразу возвращаем None
+                    logging.error(f"❌ Ошибка при получении времени уведомлений: {e}")
+                    return None
+        
+        return None
     
     def set_notification_time(self, time_str):
         """Устанавливает время уведомлений в ячейку N2 листа Справочник."""
