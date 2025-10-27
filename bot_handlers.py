@@ -109,10 +109,19 @@ async def delete_message_after_delay(bot, chat_id, message_id, delay_seconds):
     NOTIFICATION_TIME_SETTINGS,
 ) = range(40)
 # === Вспомогательные функции ===
-def create_calendar_keyboard(year, month):
+def create_calendar_keyboard(year, month, back_callback="menu_subscriptions"):
+    """
+    Создает клавиатуру календаря с возможностью переключения месяцев.
+    
+    Args:
+        year: Год для отображения
+        month: Месяц для отображения (1-12)
+        back_callback: callback_data для кнопки "Назад"
+    """
     keyboard = []
     ru_months = ["Янв", "Фев", "Мар", "Апр", "Май", "Июн", "Июл", "Авг", "Сен", "Окт", "Ноя", "Дек"]
     
+    # Кнопки переключения месяцев
     prev_month_data = f"cal_month_{year}_{month-1}" if month > 1 else f"cal_month_{year-1}_12"
     next_month_data = f"cal_month_{year}_{month+1}" if month < 12 else f"cal_month_{year+1}_1"
     keyboard.append([
@@ -121,9 +130,14 @@ def create_calendar_keyboard(year, month):
         InlineKeyboardButton(">>", callback_data=next_month_data)
     ])
     
+    # Дни недели
     week_days = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
     keyboard.append([InlineKeyboardButton(day, callback_data="ignore") for day in week_days])
     
+    # Получаем текущую дату для фильтрации прошедших дат
+    today = datetime.now()
+    
+    # Создаем календарь месяца
     month_calendar = []
     first_day_weekday, num_days = monthrange(year, month)
     
@@ -134,12 +148,20 @@ def create_calendar_keyboard(year, month):
             if (len(month_calendar) == 0 and i < first_day_weekday) or current_day > num_days:
                 row.append(InlineKeyboardButton(" ", callback_data="ignore"))
             else:
-                row.append(InlineKeyboardButton(str(current_day), callback_data=f"cal_day_{current_day}"))
+                # ИСПРАВЛЕНО: используем правильный формат cal_{year}_{month}_{day}
+                current_date = datetime(year, month, current_day)
+                
+                # Разрешаем выбирать только сегодня и будущие даты
+                if current_date.date() >= today.date():
+                    row.append(InlineKeyboardButton(str(current_day), callback_data=f"cal_{year}_{month}_{current_day}"))
+                else:
+                    row.append(InlineKeyboardButton(" ", callback_data="ignore"))
+                
                 current_day += 1
         month_calendar.append(row)
     
     keyboard.extend(month_calendar)
-    keyboard.append([InlineKeyboardButton("⏪ Отмена", callback_data="menu_subscriptions")])
+    keyboard.append([InlineKeyboardButton("⏪ Назад", callback_data=back_callback)])
     return InlineKeyboardMarkup(keyboard)
 
 def create_time_keyboard(prefix, hour_range=range(8, 22), minute_step=15):
@@ -4317,57 +4339,39 @@ async def create_sub_ask_for_start_date(update: Update, context: ContextTypes.DE
                     f"📉 Осталось: <b>{context.user_data['new_sub']['remaining_classes']}</b>\n\n"
                     "Шаг 8/9: Выберите дату начала абонемента.")
 
-    # Создаем календарь
+    # ИСПРАВЛЕНО: Используем универсальную функцию create_calendar_keyboard с переключением месяцев
     today = datetime.now()
-    calendar_keyboard = []
     
-    # Заголовок месяца
-    month_names = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь',
-                   'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь']
-    calendar_keyboard.append([InlineKeyboardButton(f"{month_names[today.month-1]} {today.year}", callback_data="ignore")])
+    # Сохраняем текущий год и месяц для переключения
+    context.user_data['calendar_year'] = today.year
+    context.user_data['calendar_month'] = today.month
     
-    # Дни недели
-    calendar_keyboard.append([
-        InlineKeyboardButton("Пн", callback_data="ignore"),
-        InlineKeyboardButton("Вт", callback_data="ignore"),
-        InlineKeyboardButton("Ср", callback_data="ignore"),
-        InlineKeyboardButton("Чт", callback_data="ignore"),
-        InlineKeyboardButton("Пт", callback_data="ignore"),
-        InlineKeyboardButton("Сб", callback_data="ignore"),
-        InlineKeyboardButton("Вс", callback_data="ignore")
-    ])
+    # Создаем календарь с кнопками переключения месяцев
+    reply_markup = create_calendar_keyboard(today.year, today.month, back_callback="back_to_remaining_classes")
     
-    # Получаем первый день месяца и количество дней
-    first_day = today.replace(day=1)
-    start_weekday = first_day.weekday()  # 0 = понедельник
-    days_in_month = (today.replace(month=today.month % 12 + 1, day=1) - timedelta(days=1)).day if today.month < 12 else 31
+    await update.callback_query.edit_message_text(message_text, reply_markup=reply_markup, parse_mode='HTML')
+    return CREATE_SUB_START_DATE_MONTH
+
+async def create_sub_start_date_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Показывает календарь для выбора даты начала."""
+    message_text = (f"👤 Ребенок: <b>{context.user_data['new_sub']['child_name']}</b>\n"
+                    f"🎨 Кружок: <b>{context.user_data['new_sub']['circle_name']}</b>\n"
+                    f"⚜️ Тип: <b>{context.user_data['new_sub']['sub_type']}</b>\n"
+                    f"💳 Оплата: <b>{context.user_data['new_sub']['payment_type']}</b>\n"
+                    f"💰 Стоимость: <b>{context.user_data['new_sub']['cost']} ₽</b>\n"
+                    f"📚 Всего занятий: <b>{context.user_data['new_sub']['total_classes']}</b>\n"
+                    f"📉 Осталось: <b>{context.user_data['new_sub']['remaining_classes']}</b>\n\n"
+                    "Шаг 8/9: Выберите дату начала абонемента.")
+
+    # ИСПРАВЛЕНО: Используем универсальную функцию create_calendar_keyboard с переключением месяцев
+    today = datetime.now()
     
-    # Создаем строки календаря
-    week = []
+    # Сохраняем текущий год и месяц для переключения
+    context.user_data['calendar_year'] = today.year
+    context.user_data['calendar_month'] = today.month
     
-    # Пустые ячейки в начале
-    for _ in range(start_weekday):
-        week.append(InlineKeyboardButton(" ", callback_data="ignore"))
-    
-    # Дни месяца
-    for day in range(1, days_in_month + 1):
-        if day >= today.day:  # Только будущие даты
-            week.append(InlineKeyboardButton(str(day), callback_data=f"cal_{today.year}_{today.month}_{day}"))
-        else:
-            week.append(InlineKeyboardButton(" ", callback_data="ignore"))
-        
-        if len(week) == 7:
-            calendar_keyboard.append(week)
-            week = []
-    
-    # Добавляем оставшиеся дни
-    if week:
-        while len(week) < 7:
-            week.append(InlineKeyboardButton(" ", callback_data="ignore"))
-        calendar_keyboard.append(week)
-    
-    calendar_keyboard.append([InlineKeyboardButton("⏪ Назад", callback_data="back_to_remaining_classes")])
-    reply_markup = InlineKeyboardMarkup(calendar_keyboard)
+    # Создаем календарь с кнопками переключения месяцев
+    reply_markup = create_calendar_keyboard(today.year, today.month, back_callback="back_to_remaining_classes")
     
     await update.callback_query.edit_message_text(message_text, reply_markup=reply_markup, parse_mode='HTML')
     return CREATE_SUB_START_DATE_MONTH
@@ -4417,7 +4421,8 @@ async def create_sub_calendar_handler(update: Update, context: ContextTypes.DEFA
         context.user_data['calendar_year'] = year
         context.user_data['calendar_month'] = month
         
-        calendar_keyboard = create_calendar_keyboard(year, month)
+        # ИСПРАВЛЕНО: передаем back_callback для правильной кнопки "Назад"
+        calendar_keyboard = create_calendar_keyboard(year, month, back_callback="back_to_remaining_classes")
         
         message_text = (f"👤 Ребенок: <b>{context.user_data['new_sub']['child_name']}</b>\n"
                         f"🎨 Кружок: <b>{context.user_data['new_sub']['circle_name']}</b>\n"
