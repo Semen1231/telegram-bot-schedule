@@ -975,13 +975,12 @@ class GoogleSheetsService:
                 end_date_str = str(row[11]).strip() if len(row) > 11 else ""  # L:L = индекс 11
                 sub_id = str(row[1]).strip()  # B:B = индекс 1
                 subscription_type = str(row[13]).strip().lower() if len(row) > 13 else ""  # N:N = индекс 13 (Тип абонемента)
+                start_date_str = str(row[5]).strip() if len(row) > 5 else ""  # F:F = индекс 5 (Дата начала)
                 
-                # Пропускаем разовые абонементы - для них прогноз не создается
-                if subscription_type == 'разовый':
-                    logging.info(f"🎯 Пропускаю разовый абонемент {sub_id} при создании прогноза")
-                    continue
+                # Для разовых абонементов тоже создаем прогноз (дата оплаты = дата первого занятия)
+                # Не пропускаем разовые абонементы
                 
-                if not child_name or not circle_name or not end_date_str or not sub_id:
+                if not child_name or not circle_name or not sub_id:
                     logging.debug(f"Строка {i}: пропускаем из-за пустых данных - ребенок:'{child_name}', кружок:'{circle_name}', дата:'{end_date_str}', ID:'{sub_id}'")
                     continue
                 
@@ -1003,7 +1002,9 @@ class GoogleSheetsService:
                     'total_classes': total_classes,
                     'cost': cost,
                     'end_date': end_date,
-                    'sub_id': sub_id
+                    'sub_id': sub_id,
+                    'subscription_type': subscription_type,
+                    'start_date_str': start_date_str
                 }
                 
                 grouped_subscriptions[key].append(subscription_data)
@@ -1129,6 +1130,42 @@ class GoogleSheetsService:
             for key, latest_sub in latest_subscriptions.items():
                 logging.info(f"=== Обрабатываю группу: {key} ===")
                 
+                # СПЕЦИАЛЬНАЯ ЛОГИКА ДЛЯ РАЗОВЫХ АБОНЕМЕНТОВ
+                if latest_sub.get('subscription_type', '').lower() == 'разовый':
+                    logging.info(f"🎯 Разовый абонемент {latest_sub['sub_id']} - создаем прогноз с датой оплаты = дате первого занятия")
+                    
+                    # Для разовых абонементов дата оплаты = дата первого занятия (дата начала из столбца F)
+                    if latest_sub.get('start_date_str'):
+                        try:
+                            first_lesson_date = datetime.strptime(latest_sub['start_date_str'], '%d.%m.%Y')
+                            
+                            # Проверяем, что дата в периоде прогноза
+                            if start_of_period <= first_lesson_date <= end_of_period:
+                                payment_key = (latest_sub['circle_name'], latest_sub['child_name'], first_lesson_date.strftime('%d.%m.%Y'))
+                                
+                                if payment_key not in added_payments:
+                                    forecast_rows.append([
+                                        latest_sub['circle_name'],  # A:A (Кружок)
+                                        latest_sub['child_name'],   # B:B (Ребенок)
+                                        first_lesson_date.strftime('%d.%m.%Y'),  # C:C (Дата оплаты = дата первого занятия)
+                                        latest_sub['cost'],  # D:D (Бюджет)
+                                        "Оплата запланирована"  # E:E (Статус)
+                                    ])
+                                    added_payments.add(payment_key)
+                                    logging.info(f"✅ Добавлен разовый абонемент в прогноз: {first_lesson_date.strftime('%d.%m.%Y')} для {key}, бюджет {latest_sub['cost']}")
+                                else:
+                                    logging.debug(f"⚠️ Дубликат пропущен для разового абонемента: {first_lesson_date.strftime('%d.%m.%Y')} для {key}")
+                            else:
+                                logging.debug(f"🎯 Разовый абонемент {latest_sub['sub_id']}: дата {first_lesson_date.strftime('%d.%m.%Y')} вне периода прогноза")
+                        except ValueError:
+                            logging.warning(f"⚠️ Некорректная дата начала для разового абонемента {latest_sub['sub_id']}: {latest_sub.get('start_date_str')}")
+                    else:
+                        logging.warning(f"⚠️ Не указана дата начала для разового абонемента {latest_sub['sub_id']}")
+                    
+                    # Разовые абонементы не создают циклический прогноз, пропускаем
+                    continue
+                
+                # ОБЫЧНАЯ ЛОГИКА ДЛЯ НЕ РАЗОВЫХ АБОНЕМЕНТОВ
                 # Проверяем наличие шаблона расписания для этого абонемента
                 if latest_sub['sub_id'] not in subscription_schedule:
                     error_msg = f"{latest_sub['child_name']} - {latest_sub['circle_name']}: не найден шаблон расписания для ID {latest_sub['sub_id']}"
@@ -3295,6 +3332,25 @@ class GoogleSheetsService:
             paid_sheet.append_row(new_row, value_input_option='USER_ENTERED')
             
             logging.info(f"✅ Создана запись в 'Оплачено': {child_name} - {circle_name}, дата {lesson_date}, сумма {cost}")
+            
+            # ВАЖНО: Удаляем запись из листа "Прогноз" (если она там есть)
+            try:
+                forecast_sheet = self.spreadsheet.worksheet("Прогноз")
+                forecast_data = forecast_sheet.get_all_values()
+                
+                # Ищем и удаляем запись с такими же данными
+                for i, row in enumerate(forecast_data[1:], start=2):  # Начинаем со строки 2
+                    if len(row) >= 3:
+                        if (str(row[0]).strip() == str(circle_name).strip() and 
+                            str(row[1]).strip() == str(child_name).strip() and 
+                            str(row[2]).strip() == str(lesson_date).strip()):
+                            forecast_sheet.delete_rows(i)
+                            logging.info(f"✅ Удалена запись из 'Прогноз': {child_name} - {circle_name} на {lesson_date}")
+                            break
+            except Exception as e:
+                logging.warning(f"⚠️ Не удалось удалить запись из 'Прогноз': {e}")
+                # Не прерываем выполнение, т.к. главное - создать запись в "Оплачено"
+            
             return True
             
         except Exception as e:

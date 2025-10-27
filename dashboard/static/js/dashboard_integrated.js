@@ -457,6 +457,7 @@ class Dashboard {
             const total = sub.total_lessons || sub.totalLessons || sub.lessons?.length || 0;
             const completed = sub.completed_lessons || sub.completedLessons || 0;
             const remaining = sub.remaining_lessons || sub.remainingLessons || 0;
+            const missedTotal = sub.missed_lessons || 0; // M - пропущенные из листа Абонементы
             const progressPercentage = sub.progress_percent || sub.progressPercent || (total > 0 ? (completed / total) * 100 : 0);
             const missed = sub.missed_this_month || sub.missedThisMonth || 0;
             
@@ -465,37 +466,62 @@ class Dashboard {
                 name: sub.name,
                 total_lessons: sub.total_lessons,
                 completed_lessons: sub.completed_lessons,
+                missed_lessons: missedTotal,
                 progress_percent: sub.progress_percent,
-                calculated: { total, completed, remaining, progressPercentage }
+                calculated: { total, completed, remaining, missedTotal, progressPercentage }
             });
             
             let progressBarHTML = '';
             const lessons = sub.lessons || [];
             
-            // Создаем сегменты для всех запланированных занятий
-            for (let i = 0; i < total; i++) {
+            // Создаем сегменты: всего блоков = total (H + I + M)
+            // Сначала completed (H) посещенных занятий с градиентом
+            // Затем missedTotal (M) пропущенных занятий красным
+            // Затем remaining (I) оставшихся занятий серым
+            
+            // 1. Посещенные занятия (H) - синий градиент
+            for (let i = 0; i < completed; i++) {
                 const lesson = lessons[i];
-                let segmentClass = 'bg-gray-700';
-                let segmentStyle = '';
+                const startColor = [0, 193, 255];
+                const endColor = [106, 0, 255];
+                const ratio = completed > 1 ? i / (completed - 1) : 1;
+                const r = Math.round(startColor[0] * (1 - ratio) + endColor[0] * ratio);
+                const g = Math.round(startColor[1] * (1 - ratio) + endColor[1] * ratio);
+                const b = Math.round(startColor[2] * (1 - ratio) + endColor[2] * ratio);
+                const segmentStyle = `background-color: rgb(${r}, ${g}, ${b});`;
                 
-                if (lesson) {
-                    if (lesson.status === 'Посещение' || lesson.attendance === 'Посещение') {
-                        const startColor = [0, 193, 255];
-                        const endColor = [106, 0, 255];
-                        const ratio = total > 1 ? i / (total - 1) : 1;
-                        const r = Math.round(startColor[0] * (1 - ratio) + endColor[0] * ratio);
-                        const g = Math.round(startColor[1] * (1 - ratio) + endColor[1] * ratio);
-                        const b = Math.round(startColor[2] * (1 - ratio) + endColor[2] * ratio);
-                        segmentStyle = `background-color: rgb(${r}, ${g}, ${b});`;
-                    } else if (lesson.status === 'Пропуск' || lesson.attendance === 'Пропуск') {
-                        segmentClass = 'bg-orange-500';
-                    }
-                }
-                
-                progressBarHTML += `<div class="progress-segment ${segmentClass}" style="${segmentStyle}"
+                progressBarHTML += `<div class="progress-segment" style="${segmentStyle}"
                     data-id="${sub.id}"
                     data-date="${lesson?.date || ''}"
-                    data-status="${lesson?.status || lesson?.attendance || 'Запланировано'}"
+                    data-status="Посещение"
+                    data-start="${lesson?.time || lesson?.start_time || ''}"
+                    data-end="${lesson?.end_time || ''}"
+                ></div>`;
+            }
+            
+            // 2. Пропущенные занятия (M) - красный/оранжевый
+            for (let i = 0; i < missedTotal; i++) {
+                const lessonIndex = completed + i;
+                const lesson = lessons[lessonIndex];
+                
+                progressBarHTML += `<div class="progress-segment bg-red-500"
+                    data-id="${sub.id}"
+                    data-date="${lesson?.date || ''}"
+                    data-status="Пропуск"
+                    data-start="${lesson?.time || lesson?.start_time || ''}"
+                    data-end="${lesson?.end_time || ''}"
+                ></div>`;
+            }
+            
+            // 3. Оставшиеся занятия (I) - серый
+            for (let i = 0; i < remaining; i++) {
+                const lessonIndex = completed + missedTotal + i;
+                const lesson = lessons[lessonIndex];
+                
+                progressBarHTML += `<div class="progress-segment bg-gray-700"
+                    data-id="${sub.id}"
+                    data-date="${lesson?.date || ''}"
+                    data-status="Запланировано"
                     data-start="${lesson?.time || lesson?.start_time || ''}"
                     data-end="${lesson?.end_time || ''}"
                 ></div>`;

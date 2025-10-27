@@ -224,25 +224,46 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
             # Удаляем команду /start
             await update.message.delete()
             
-            # Пытаемся очистить чат (удаляем последние сообщения)
+            # Пытаемся очистить чат (удаляем старые сообщения)
             chat_id = update.effective_chat.id
             deleted_count = 0
+            start_message_id = update.message.message_id
             
-            # Пробуем удалить последние 20 сообщений (исключая сообщение загрузки)
-            for i in range(1, 21):
+            # Удаляем сообщения в ОБЕ СТОРОНЫ от команды /start
+            # Telegram позволяет удалять сообщения только за последние 48 часов
+            # Пробуем удалить до 150 сообщений (75 назад + 75 вперед)
+            
+            # 1. Удаляем сообщения НАЗАД (старые сообщения)
+            for i in range(1, 76):
                 try:
-                    message_id_to_delete = update.message.message_id - i
+                    message_id_to_delete = start_message_id - i
+                    if message_id_to_delete > 0:
+                        # Не удаляем сообщение загрузки
+                        if loading_message and message_id_to_delete == loading_message.message_id:
+                            continue
+                        await context.bot.delete_message(chat_id=chat_id, message_id=message_id_to_delete)
+                        deleted_count += 1
+                except Exception:
+                    # Если сообщение не найдено или не может быть удалено, продолжаем
+                    continue
+            
+            # 2. Удаляем сообщения ВПЕРЕД (если были после команды /start)
+            for i in range(1, 76):
+                try:
+                    message_id_to_delete = start_message_id + i
                     # Не удаляем сообщение загрузки
                     if loading_message and message_id_to_delete == loading_message.message_id:
                         continue
                     await context.bot.delete_message(chat_id=chat_id, message_id=message_id_to_delete)
                     deleted_count += 1
                 except Exception:
-                    # Если сообщение не найдено или не может быть удалено, пропускаем
-                    continue
+                    # Если сообщение не найдено, прекращаем (дошли до конца)
+                    break
             
             if deleted_count > 0:
                 logging.info(f"🧹 Очищен чат: удалено {deleted_count} сообщений")
+            else:
+                logging.info(f"🧹 Нет сообщений для удаления (возможно бот не имеет прав или все сообщения старше 48 часов)")
             
         except Exception as e:
             logging.warning(f"⚠️ Не удалось полностью очистить чат: {e}")
