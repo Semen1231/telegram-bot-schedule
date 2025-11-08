@@ -1855,16 +1855,38 @@ async def calendar_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         # Группируем занятия по датам, показываем ВСЕ занятия
         lessons_by_date = {}
         valid_lessons_count = 0
+        ninja_lessons_found = 0
         
         for lesson in lessons:
             date_str = lesson.get('Дата занятия', '')
+            subscription_id = lesson.get('ID абонемента', '')
+            
+            # ОТЛАДКА: Логируем занятия "Ниндзя"
+            if 'Ниндзя' in subscription_id or 'ниндзя' in subscription_id.lower():
+                ninja_lessons_found += 1
+                logging.info(f"🥷 Найдено занятие Ниндзя: Дата='{date_str}', ID='{subscription_id}', Статус='{lesson.get('Статус посещения', '')}'")
             
             # Показываем все занятия с валидными датами
             if date_str and date_str.strip():
-                if date_str not in lessons_by_date:
-                    lessons_by_date[date_str] = []
-                lessons_by_date[date_str].append(lesson)
+                # Нормализуем формат даты: 8.11.2025 -> 08.11.2025
+                try:
+                    parts = date_str.split('.')
+                    if len(parts) == 3:
+                        day = parts[0].zfill(2)  # Добавляем ведущий ноль
+                        month = parts[1].zfill(2)  # Добавляем ведущий ноль
+                        year = parts[2]
+                        normalized_date = f"{day}.{month}.{year}"
+                    else:
+                        normalized_date = date_str
+                except:
+                    normalized_date = date_str
+                
+                if normalized_date not in lessons_by_date:
+                    lessons_by_date[normalized_date] = []
+                lessons_by_date[normalized_date].append(lesson)
                 valid_lessons_count += 1
+        
+        logging.info(f"🥷 Всего занятий Ниндзя: {ninja_lessons_found}")
         
         # Логирование для отладки
         logging.info(f"📊 Валидных занятий с датами: {valid_lessons_count}")

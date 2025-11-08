@@ -2579,11 +2579,11 @@ class GoogleSheetsService:
             
             logging.info("📊 Загрузка данных из листа...")
             
-            # Аналогично для загрузки данных
-            data = None
+            # Используем get_all_values() вместо get_all_records() для получения ВСЕХ строк
+            all_values = None
             for attempt in range(max_retries):
                 try:
-                    data = calendar_sheet.get_all_records()
+                    all_values = calendar_sheet.get_all_values()
                     break
                 except gspread.exceptions.APIError as e:
                     if "429" in str(e) and attempt < max_retries - 1:
@@ -2594,10 +2594,34 @@ class GoogleSheetsService:
                     else:
                         raise
             
+            # Преобразуем в список словарей
+            data = None
+            if all_values and len(all_values) > 1:
+                headers = all_values[0]
+                data = []
+                for row in all_values[1:]:
+                    # Создаем словарь для каждой строки
+                    row_dict = {}
+                    for i, header in enumerate(headers):
+                        row_dict[header] = row[i] if i < len(row) else ''
+                    data.append(row_dict)
+            
             if data is not None:
                 logging.info(f"✅ Успешно загружено {len(data)} записей из календаря")
                 if data:
                     logging.info(f"📝 Пример первой записи: {data[0]}")
+                    
+                    # ОТЛАДКА: Проверяем наличие занятия "Ниндзя"
+                    ninja_found = False
+                    for i, lesson in enumerate(data):
+                        lesson_id_ab = str(lesson.get('ID абонемента', '')).strip()
+                        if 'Ниндзя' in lesson_id_ab or 'ниндзя' in lesson_id_ab.lower():
+                            ninja_found = True
+                            logging.info(f"🥷 НАЙДЕНО занятие Ниндзя (запись #{i+1}): {lesson}")
+                    
+                    if not ninja_found:
+                        logging.warning(f"⚠️ Занятие 'Ниндзя' НЕ НАЙДЕНО в {len(data)} загруженных записях")
+                        logging.info(f"📋 Все ID абонементов: {[str(l.get('ID абонемента', '')).strip() for l in data[:10]]}...")
                 
                 # Сохраняем в кеш на 30 секунд
                 self._save_to_cache(cache_key, data, duration=30)
