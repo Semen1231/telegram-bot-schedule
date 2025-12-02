@@ -692,7 +692,7 @@ class GoogleSheetsService:
             logging.error(f"Ошибка при получении следующего ID занятия: {e}")
             return 1
 
-    def generate_schedule_for_subscription(self, sub_id, child_name, start_date_str, classes_to_generate, template):
+    def generate_schedule_for_subscription(self, sub_id, child_name, start_date_str, classes_to_generate, template, end_date_str=None):
         """Генерирует расписание в 'Календарь занятий'."""
         try:
             cal_sheet = self.spreadsheet.worksheet("Календарь занятий")
@@ -789,24 +789,46 @@ class GoogleSheetsService:
                 for i, entry in enumerate(template_entries):
                     logging.info(f"  📋 Запись {i+1}: ID={entry[0]}, День={entry[2]}, Время={entry[3]}-{entry[4]}")
 
-            # Определяем количество занятий для генерации
-            # Если есть оставшиеся занятия, используем их, иначе общее количество
-            classes_to_generate = sub_data.get('remaining_classes', sub_data['total_classes'])
-            
-            last_class_date = self.generate_schedule_for_subscription(
-                sub_id, sub_data['child_name'], start_date.strftime('%d.%m.%Y'), 
-                classes_to_generate, sub_data['schedule']
-            )
+            # --- Новая логика для 'Фиксированного' абонемента ---
+            total_classes_for_sub = 0
+            end_date_for_sub = None
+
+            if sub_data['sub_type'].lower() == 'фиксированный':
+                logging.info(f"Тип абонемента 'Фиксированный'. Рассчитываю занятия до конца месяца.")
+                # Вычисляем последний день месяца
+                from calendar import monthrange
+                last_day_of_month = monthrange(start_date.year, start_date.month)[1]
+                end_date_of_month = start_date.replace(day=last_day_of_month)
+                
+                # Генерируем занятия до конца месяца
+                last_class_date, generated_classes_count = self.generate_schedule_for_subscription(
+                    sub_id, sub_data['child_name'], start_date.strftime('%d.%m.%Y'), 
+                    0, sub_data['schedule'], end_date_of_month.strftime('%d.%m.%Y')
+                )
+                total_classes_for_sub = generated_classes_count
+                end_date_for_sub = last_class_date
+            else:
+                # Старая логика для остальных типов абонементов
+                classes_to_generate = sub_data.get('remaining_classes', sub_data['total_classes'])
+                last_class_date, generated_classes_count = self.generate_schedule_for_subscription(
+                    sub_id, sub_data['child_name'], start_date.strftime('%d.%m.%Y'), 
+                    classes_to_generate, sub_data['schedule']
+                )
+                total_classes_for_sub = sub_data['total_classes'] # В абонемент записываем общее количество
+                end_date_for_sub = last_class_date
+
+            # Используем рассчитанное или указанное количество занятий
+            remaining_classes = generated_classes_count
 
             payment_type = sub_data.get('payment_type', '')
             logging.info(f"🔍 Тип оплаты для нового абонемента: '{payment_type}'")
             
             new_row = [
                 next_row_num - 1, sub_id, sub_data['child_name'], sub_data['circle_name'],
-                sub_data['total_classes'], start_date.strftime('%d.%m.%Y'), 
-                last_class_date.strftime('%d.%m.%Y') if last_class_date else '',
-                0, sub_data['remaining_classes'], "Ожидает", sub_data['cost'],
-                last_class_date.strftime('%d.%m.%Y') if last_class_date else '',
+                total_classes_for_sub, start_date.strftime('%d.%m.%Y'), 
+                end_date_for_sub.strftime('%d.%m.%Y') if end_date_for_sub else '',
+                0, remaining_classes, "Ожидает", sub_data['cost'],
+                end_date_for_sub.strftime('%d.%m.%Y') if end_date_for_sub else '',
                 0, sub_data['sub_type'], payment_type
             ]
             
@@ -845,7 +867,7 @@ class GoogleSheetsService:
                 return f"❌ Произошла ошибка при создании абонемента.\n\n🔧 Детали: {error_msg}\n\n📞 Обратитесь к администратору, если ошибка повторяется."
     
     def create_payment_forecast(self, sub_id, sub_data):
-        """Создает прогноз оплат для абонемента - обновление прогноза выполняется в фоне."""
+        """Создает прогноз оплат для абонемента - обновление прогноза выполняется в фоновых обновлениях после создания абонемента."""
         try:
             # Прогноз будет обновлен в фоновых обновлениях после создания абонемента
             logging.info(f"Прогноз для абонемента {sub_id} будет создан в фоновых обновлениях")
@@ -3153,8 +3175,7 @@ class GoogleSheetsService:
             for row in calendar_data[1:]:  # Пропускаем заголовки
                 if len(row) >= 6 and str(row[1]).strip() == subscription_id:  # B:B - ID абонемента
                     try:
-                        lesson_date_str = str(row[2]).strip()  # C:C - Дата занятия
-                        lesson_date = datetime.strptime(lesson_date_str, '%d.%m.%Y')
+                        lesson_date = datetime.strptime(str(row[2]).strip(), '%d.%m.%Y')  # C:C - Дата занятия
                         if last_lesson_date is None or lesson_date > last_lesson_date:
                             last_lesson_date = lesson_date
                     except ValueError:

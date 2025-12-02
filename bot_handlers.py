@@ -1358,15 +1358,15 @@ async def renewal_custom_date_handler(update: Update, context: ContextTypes.DEFA
     """Обрабатывает выбор пользовательской даты из календаря."""
     query = update.callback_query
     await query.answer()
-    
-    if query.data.startswith("cal_day_"):
-        # Пользователь выбрал день
-        day = int(query.data.replace("cal_day_", ""))
+
+    # ИСПРАВЛЕНО: Обрабатываем новый формат callback_data от календаря
+    if query.data.startswith("cal_") and not query.data.startswith("cal_month_"):
+        # Пользователь выбрал день, например 'cal_2025_12_2'
+        parts = query.data.split('_')
+        year, month, day = int(parts[1]), int(parts[2]), int(parts[3])
         
-        # Получаем текущий месяц и год из контекста или используем текущие
         from datetime import datetime
-        current_date = datetime.now()
-        selected_date = datetime(current_date.year, current_date.month, day)
+        selected_date = datetime(year, month, day)
         
         context.user_data['renewal_start_date'] = selected_date.strftime('%d.%m.%Y')
         return await renewal_confirm_handler(update, context)
@@ -5435,7 +5435,8 @@ def create_conversation_handler() -> ConversationHandler:
                 CallbackQueryHandler(forecast_subscription_handler, pattern='^forecast_sub_')
             ],
             RENEWAL_SELECT_CUSTOM_DATE: [
-                CallbackQueryHandler(renewal_custom_date_handler, pattern='^(cal_day_|cal_month_)'),
+                # ИСПРАВЛЕНО: Обновлен паттерн для соответствия формату cal_ГОД_МЕСЯЦ_ДЕНЬ
+                CallbackQueryHandler(renewal_custom_date_handler, pattern='^cal_'),
                 CallbackQueryHandler(renewal_date_type_handler, pattern='^renewal_select_custom_date$')
             ],
             RENEWAL_CONFIRM: [
