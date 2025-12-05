@@ -1344,7 +1344,7 @@ async def renewal_date_type_handler(update: Update, context: ContextTypes.DEFAUL
         message_text += f"🎨 <b>Кружок:</b> {context.user_data['renewal_circle_name']}\n\n"
         message_text += "📅 Выберите дату начала нового абонемента:"
         
-        calendar_keyboard = create_calendar_keyboard(current_date.year, current_date.month)
+        calendar_keyboard = create_calendar_keyboard(current_date.year, current_date.month, back_callback="renewal_select_custom_date")
         await query.edit_message_text(message_text, reply_markup=calendar_keyboard, parse_mode='HTML')
         return RENEWAL_SELECT_CUSTOM_DATE
     
@@ -1382,7 +1382,7 @@ async def renewal_custom_date_handler(update: Update, context: ContextTypes.DEFA
         message_text += f"🎨 <b>Кружок:</b> {context.user_data['renewal_circle_name']}\n\n"
         message_text += "📅 Выберите дату начала нового абонемента:"
         
-        calendar_keyboard = create_calendar_keyboard(year, month)
+        calendar_keyboard = create_calendar_keyboard(year, month, back_callback="renewal_select_custom_date")
         await query.edit_message_text(message_text, reply_markup=calendar_keyboard, parse_mode='HTML')
         return RENEWAL_SELECT_CUSTOM_DATE
     
