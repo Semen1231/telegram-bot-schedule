@@ -698,7 +698,7 @@ class GoogleSheetsService:
             cal_sheet = self.spreadsheet.worksheet("Календарь занятий")
             
             if classes_to_generate <= 0:
-                return None
+                return None, 0
 
             new_cal_entries = []
             last_generated_date = None
@@ -752,7 +752,7 @@ class GoogleSheetsService:
                 logging.info(f"✅ Создано {len(new_cal_entries)} занятий с уникальными ID от {next_available_id} до {next_available_id + len(new_cal_entries) - 1}")
                 logging.info(f"📋 Абонемент {sub_id}: занятия получили фиксированные ID, которые не будут изменяться")
 
-            return last_generated_date
+            return last_generated_date, classes_added
         
         except Exception as e:
             logging.error(f"Ошибка при генерации расписания для ID {sub_id}: {e}", exc_info=True)
